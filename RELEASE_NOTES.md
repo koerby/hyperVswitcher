@@ -1,5 +1,44 @@
 # HyperTool Release Notes
 
+## v2.0.0
+
+### Highlights
+
+- Major Release: HyperTool ist jetzt vollständig auf WinUI 3 umgestellt.
+- Modernisierte Oberfläche mit konsistentem Dark/Light Theme und verbessertem Window-/Tray-Verhalten.
+- Build- und Release-Prozess auf WinUI-only vereinheitlicht (App + Installer über BAT-Skripte).
+- Installer prüft .NET Desktop Runtime 8 automatisch und installiert diese bei Bedarf.
+
+### Neu
+
+- WinUI-3 App als neue Hauptanwendung (`HyperTool.Core` + `HyperTool.WinUI`).
+- Überarbeiteter Theme-Flow mit sauberem Übergang und robustem Rebuild der Hauptansicht.
+- Inno-Setup-Installer mit Runtime-Prüfung für `Microsoft.WindowsDesktop.App` (x64).
+- WinUI-Build-/Installer-Pipeline:
+	- `build-winui.bat`
+	- `build-installer-winui.bat`
+
+### Verbessert
+
+- Export-Statusanzeige überarbeitet:
+	- Fortschritt wird nur angezeigt, wenn Hyper-V verlässliche Werte liefert.
+	- Irreführende Sprünge/Flicker in Prozentanzeige und Progressbar reduziert.
+	- Monotones Fortschrittsverhalten (kein Zurückspringen im Balken).
+- Fehlerrobustheit bei Hyper-V Aktionen verbessert (klarere Meldungen für Berechtigung/PowerShell-Fehler).
+- Repository auf WinUI-only bereinigt (Legacy-WPF-Struktur entfernt).
+
+### Behoben
+
+- Fataler Fehler beim VM-Export in der Speicherplatzprüfung (PowerShell-RegEx/UNC-Parsing) behoben.
+- Export-Fehlerpfad stabilisiert: Ausnahmen führen nicht mehr zu hartem App-Abbruch.
+- Mehrere Probleme im Theme-Wechsel-/Rebuild-Flow behoben.
+
+### Kompatibilität
+
+- Windows 10/11
+- Hyper-V aktiviert
+- .NET Desktop Runtime 8 (wird vom Installer bei Bedarf installiert)
+
 ## v1.3.4
 
 ### Highlights
