@@ -1267,15 +1267,15 @@ public sealed class MainWindow : Window
         var titleActions = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 8,
+            Spacing = 10,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top
         };
 
         var helpButton = new Button
         {
-            Width = 58,
-            Height = 58,
+            Width = 54,
+            Height = 54,
             CornerRadius = new CornerRadius(12),
             BorderThickness = new Thickness(1),
             BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
@@ -1300,15 +1300,15 @@ public sealed class MainWindow : Window
             BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
             Background = Application.Current.Resources["PanelBackgroundBrush"] as Brush,
             CornerRadius = new CornerRadius(12),
-            Width = 58,
-            Height = 58,
-            Padding = new Thickness(7)
+            Width = 54,
+            Height = 54,
+            Padding = new Thickness(6)
         };
         var logoImage = new Image
         {
             Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/Logo.png")),
-            Width = 42,
-            Height = 42,
+            Width = 40,
+            Height = 40,
             RenderTransform = _logoRotateTransform,
             RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5)
         };

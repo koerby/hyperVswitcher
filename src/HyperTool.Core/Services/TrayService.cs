@@ -187,6 +187,33 @@ public sealed class TrayService : ITrayService
                 Log.Warning(ex, "Tray mouse handler failed for button {Button}.", e.Button);
             }
         };
+
+        _notifyIcon.MouseDoubleClick += (_, e) =>
+        {
+            try
+            {
+                if (e.Button != MouseButtons.Left)
+                {
+                    return;
+                }
+
+                _hideControlCenterAction?.Invoke();
+                HideQuickPanel();
+
+                if (IsWindowVisible())
+                {
+                    _hideAction?.Invoke();
+                }
+                else
+                {
+                    _showAction?.Invoke();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Tray double-click handler failed.");
+            }
+        };
         Log.Information("Tray icon initialized.");
     }
 

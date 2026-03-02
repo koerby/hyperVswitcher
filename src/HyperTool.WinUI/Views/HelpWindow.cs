@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Windowing;
+using HyperTool.WinUI.Helpers;
 using System.Diagnostics;
 using System.IO;
 using Windows.Graphics;
@@ -22,6 +23,7 @@ public sealed class HelpWindow : Window
         _isDarkMode = string.Equals(uiTheme, "Dark", StringComparison.OrdinalIgnoreCase);
 
         Title = "HyperTool Hilfe";
+        DwmWindowHelper.ApplyRoundedCorners(this);
         AppWindow.Resize(new SizeInt32(860, 720));
         TryApplyWindowIcon();
 
@@ -32,18 +34,23 @@ public sealed class HelpWindow : Window
 
     private UIElement BuildLayout()
     {
+        var host = new Grid
+        {
+            Background = Application.Current.Resources["PageBackgroundBrush"] as Brush
+        };
+
         var root = new Grid
         {
-            Margin = new Thickness(16),
+            Margin = new Thickness(18),
             Background = Application.Current.Resources["PageBackgroundBrush"] as Brush
         };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(12) });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(12) });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var headerCard = CreateCard(14);
+        var headerCard = CreateCard(16);
         var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
         headerRow.Children.Add(new Image
         {
@@ -58,8 +65,8 @@ public sealed class HelpWindow : Window
         headerCard.Child = headerRow;
         root.Children.Add(headerCard);
 
-        var bodyCard = CreateCard(14);
-        var bodyStack = new StackPanel { Spacing = 10 };
+        var bodyCard = CreateCard(12);
+        var bodyStack = new StackPanel { Spacing = 12 };
         bodyStack.Children.Add(CreateSection("VM Auswahl", "Oben im Header werden alle Hyper-V VMs angezeigt. Klick auf einen Chip wählt die aktive Arbeits-VM."));
         bodyStack.Children.Add(CreateSection("One Click Aktionen", "Im VM-Bereich kannst du VM starten, stoppen, hart ausschalten, neu starten und die VM-Konsole öffnen."));
         bodyStack.Children.Add(CreateSection("Netzwerk", "Pro Netzwerkkarte kannst du den Switch direkt per One-Click umstellen. Host-Netzwerk öffnet die detaillierte Adapter-Ansicht."));
@@ -78,7 +85,7 @@ public sealed class HelpWindow : Window
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right,
-            Spacing = 8
+            Spacing = 10
         };
 
         actions.Children.Add(CreateActionButton("📄", "Logs öffnen", (_, _) => OpenLogs()));
@@ -89,7 +96,8 @@ public sealed class HelpWindow : Window
         Grid.SetRow(actions, 4);
         root.Children.Add(actions);
 
-        return root;
+        host.Children.Add(root);
+        return host;
     }
 
     private static Border CreateCard(double padding)
@@ -108,7 +116,7 @@ public sealed class HelpWindow : Window
     {
         var section = new Border
         {
-            Padding = new Thickness(10),
+            Padding = new Thickness(12, 10, 12, 10),
             CornerRadius = new CornerRadius(10),
             BorderThickness = new Thickness(1),
             BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
@@ -117,7 +125,7 @@ public sealed class HelpWindow : Window
 
         var stack = new StackPanel { Spacing = 4 };
         stack.Children.Add(new TextBlock { Text = title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        stack.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Opacity = 0.9 });
+        stack.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Opacity = 0.86 });
         section.Child = stack;
         return section;
     }
