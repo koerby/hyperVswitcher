@@ -24,15 +24,22 @@ public sealed class SplashWindow : Window
     private readonly Storyboard _ambientStoryboard = new();
     private readonly Stopwatch _lifetime = Stopwatch.StartNew();
     private readonly DispatcherQueueTimer _pseudoTimer;
+    private readonly string _windowTitle;
+    private readonly string _headline;
+    private readonly string _iconUri;
 
     private readonly string[] _pseudoStatusMessages = LifecycleVisuals.StartupStatusMessages;
 
     private int _pseudoStatusIndex;
     private DateTime _lastExternalUpdateUtc = DateTime.UtcNow;
 
-    public SplashWindow()
+    public SplashWindow(string windowTitle = "HyperTool", string headline = "HyperTool", string iconUri = "ms-appx:///Assets/HyperTool.Icon.Transparent.png")
     {
-        Title = "HyperTool";
+        _windowTitle = string.IsNullOrWhiteSpace(windowTitle) ? "HyperTool" : windowTitle;
+        _headline = string.IsNullOrWhiteSpace(headline) ? "HyperTool" : headline;
+        _iconUri = string.IsNullOrWhiteSpace(iconUri) ? "ms-appx:///Assets/HyperTool.Icon.Transparent.png" : iconUri;
+
+        Title = _windowTitle;
         ExtendsContentIntoTitleBar = false;
         DwmWindowHelper.ApplyRoundedCorners(this);
 
@@ -121,7 +128,7 @@ public sealed class SplashWindow : Window
 
         var logo = new Image
         {
-            Source = new BitmapImage(new Uri("ms-appx:///Assets/HyperTool.Icon.Transparent.png")),
+            Source = new BitmapImage(new Uri(_iconUri)),
             Width = 76,
             Height = 76,
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -135,7 +142,7 @@ public sealed class SplashWindow : Window
         stack.Children.Add(logoHost);
         stack.Children.Add(new TextBlock
         {
-            Text = "HyperTool",
+            Text = _headline,
             FontSize = 34,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Center,

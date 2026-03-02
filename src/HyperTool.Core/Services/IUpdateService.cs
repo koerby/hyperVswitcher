@@ -6,5 +6,6 @@ public interface IUpdateService
         string owner,
         string repo,
         string currentVersion,
-        CancellationToken cancellationToken);
+    CancellationToken cancellationToken,
+    string? installerAssetHint = null);
 }

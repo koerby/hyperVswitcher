@@ -23,10 +23,17 @@ public sealed class ExitScreenWindow : Window
     private readonly List<Line> _networkLines = [];
     private readonly List<Ellipse> _impulses = [];
     private readonly List<Ellipse> _particles = [];
+    private readonly string _windowTitle;
+    private readonly string _headline;
+    private readonly string _iconUri;
 
-    public ExitScreenWindow()
+    public ExitScreenWindow(string windowTitle = "HyperTool", string headline = "HyperTool", string iconUri = "ms-appx:///Assets/HyperTool.Icon.Transparent.png")
     {
-        Title = "HyperTool";
+        _windowTitle = string.IsNullOrWhiteSpace(windowTitle) ? "HyperTool" : windowTitle;
+        _headline = string.IsNullOrWhiteSpace(headline) ? "HyperTool" : headline;
+        _iconUri = string.IsNullOrWhiteSpace(iconUri) ? "ms-appx:///Assets/HyperTool.Icon.Transparent.png" : iconUri;
+
+        Title = _windowTitle;
         ExtendsContentIntoTitleBar = false;
         DwmWindowHelper.ApplyRoundedCorners(this);
 
@@ -148,7 +155,7 @@ public sealed class ExitScreenWindow : Window
 
         logoHost.Children.Add(new Image
         {
-            Source = new BitmapImage(new Uri("ms-appx:///Assets/HyperTool.Icon.Transparent.png")),
+            Source = new BitmapImage(new Uri(_iconUri)),
             Width = 68,
             Height = 68,
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -158,7 +165,7 @@ public sealed class ExitScreenWindow : Window
         stack.Children.Add(logoHost);
         stack.Children.Add(new TextBlock
         {
-            Text = "HyperTool",
+            Text = _headline,
             FontSize = 30,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Center,

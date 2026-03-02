@@ -28,6 +28,10 @@ public sealed class TrayService : ITrayService
         Func<string, Task> createSnapshotAction,
         Func<string, string, Task> connectVmToSwitchAction,
         Func<string, Task> disconnectVmSwitchAction,
+        Func<UsbIpDeviceInfo?> getSelectedUsbDevice,
+        Func<Task> refreshUsbDevicesAction,
+        Func<Task> shareSelectedUsbAction,
+        Func<Task> unshareSelectedUsbAction,
         Action exitAction)
     {
         _inner.Initialize(
@@ -51,6 +55,10 @@ public sealed class TrayService : ITrayService
             createSnapshotAction,
             connectVmToSwitchAction,
             disconnectVmSwitchAction,
+                getSelectedUsbDevice,
+                refreshUsbDevicesAction,
+                shareSelectedUsbAction,
+                unshareSelectedUsbAction,
             exitAction);
     }
 

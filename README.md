@@ -27,15 +27,20 @@ HyperTool ist ein Windows-Tool zur Steuerung von Hyper-V VMs mit moderner WinUI-
 - Hyper-V aktiviert
 - PowerShell mit funktionsfähigem Hyper-V Modul (Get-VM)
 - Für Entwicklung: .NET SDK 8.x
+- Für USB-Funktionen: `usbipd-win` (HyperTool versucht bei Bedarf eine automatische Installation über `winget`)
 
 ## Projektstruktur
 
 - HyperTool.sln
 - src/HyperTool.Core
 - src/HyperTool.WinUI
+- src/HyperTool.Guest
 - HyperTool.config.json
 - build-winui.bat
 - build-installer-winui.bat
+- build-guest.bat
+- build-installer-guest.bat
+- build-all.bat
 - dist/HyperTool.WinUI (Publish-Ausgabe)
 
 ## Schnellstart (Entwicklung)
@@ -43,6 +48,39 @@ HyperTool ist ein Windows-Tool zur Steuerung von Hyper-V VMs mit moderner WinUI-
 1. dotnet restore HyperTool.sln
 2. dotnet build HyperTool.sln -c Debug
 3. dotnet run --project src/HyperTool.WinUI/HyperTool.WinUI.csproj
+
+## HyperTool.Guest (neu)
+
+`HyperTool.Guest` ist jetzt eine Guest-Desktop-App (WinUI) mit Host-ähnlichem Verhalten (Start/Exit-Visuals, Light/Dark Theme, Minimize-to-Tray, Start mit Windows). Die bisherigen Agent-Befehle bleiben per Startargument verfügbar.
+
+- Header/Sidebar-Layout ist an den Host angepasst (Guest nutzt USB, Einstellungen, Info).
+- Tray-Rechtsklick öffnet ein USB-zentriertes Guest Control Center (Einblenden/Ausblenden, Connect/Disconnect, Beenden).
+- Single-Instance aktiv: ein zweiter Start blendet die laufende Instanz wieder ein.
+
+Build/Run:
+
+- dotnet build src/HyperTool.Guest/HyperTool.Guest.csproj -c Release
+- build-guest.bat
+- build-guest.bat version=1.2.0 no-pause
+- dotnet run --project src/HyperTool.Guest/HyperTool.Guest.csproj (UI-Modus)
+- dotnet run --project src/HyperTool.Guest/HyperTool.Guest.csproj -- once
+- dotnet run --project src/HyperTool.Guest/HyperTool.Guest.csproj -- status
+- dotnet run --project src/HyperTool.Guest/HyperTool.Guest.csproj -- run
+- dotnet run --project src/HyperTool.Guest/HyperTool.Guest.csproj -- install-autostart
+- dotnet run --project src/HyperTool.Guest/HyperTool.Guest.csproj -- install-autostart task
+- dotnet run --project src/HyperTool.Guest/HyperTool.Guest.csproj -- autostart-status
+- dotnet run --project src/HyperTool.Guest/HyperTool.Guest.csproj -- remove-autostart
+- dotnet run --project src/HyperTool.Guest/HyperTool.Guest.csproj -- handshake
+
+Konfiguration:
+
+- Standardpfad: `%ProgramData%\HyperTool\HyperTool.Guest.json`
+- Beim ersten Start wird eine Beispielkonfiguration erzeugt.
+- Optionaler Override: `--config <Pfad>`
+- Phase 1 enthält zusätzlich:
+	- Autostart via `Run-Registry` oder `Task Scheduler`
+	- strukturiertes Logfile (NDJSON) unter `%ProgramData%\HyperTool\logs`
+	- Host-Handshake-Datei für spätere Host↔Guest-Kopplung unter `%ProgramData%\HyperTool\HyperTool.Guest.handshake.json`
 
 ## Build & Publish
 
@@ -52,14 +90,24 @@ Standard:
 
 Varianten:
 
+- build-all.bat (interaktiv: Host/Guest, Installer, Versionen)
+- build-all.bat host guest host-version=1.2.0 guest-version=1.2.1 no-host-installer guest-installer no-pause
 - build-winui.bat framework-dependent no-pause
 - build-winui.bat self-contained version=1.2.0
+- build-guest.bat self-contained version=1.2.0
+- build-guest.bat framework-dependent version=1.2.0
+- build-guest.bat self-contained version=1.2.0 installer
+- build-guest.bat no-installer no-pause
 - build-installer-winui.bat (fragt Version interaktiv ab)
 - build-installer-winui.bat version=1.2.0
+- build-installer-guest.bat (fragt Version interaktiv ab)
+- build-installer-guest.bat version=1.2.0
 
 WinUI-Migration-Ausgabe liegt unter dist/HyperTool.WinUI.
+Guest-Ausgabe liegt unter dist/HyperTool.Guest.
 
 Installer-Ausgabe liegt unter dist/installer-winui (benötigt Inno Setup 6 / ISCC).
+Guest-Installer-Ausgabe liegt unter dist/installer-guest (benötigt Inno Setup 6 / ISCC).
 Der Installer ist für den self-contained WinUI-Build ausgelegt und enthält keine separate .NET Desktop Runtime-Abfrage.
 
 ## WinUI 3 Stand
@@ -158,6 +206,14 @@ Wenn die App nicht startet:
 
 - Die App benötigt nicht grundsätzlich Adminrechte.
 - Einzelne Hyper-V/HNS Aktionen können erhöhte Rechte benötigen.
+- USB-Aktionen können UAC auslösen (Bind/Unbind/Detach sowie ggf. Start des `usbipd`-Dienstes).
+
+## USB (usbipd) Verhalten
+
+- HyperTool nutzt `usbipd.exe` als CLI-Bridge für USB-Share/-Unshare.
+- Wenn `usbipd-win` fehlt, versucht HyperTool einmalig eine automatische Installation via `winget`.
+- Läuft der `usbipd`-Dienst nicht, versucht HyperTool ihn automatisch zu starten (ggf. mit UAC).
+- Falls Installation/Dienststart fehlschlägt, fällt die UI auf einen klaren USB-Status zurück statt hart zu brechen (Tool + Control Center).
 
 ## Update- und Installer-Flow
 

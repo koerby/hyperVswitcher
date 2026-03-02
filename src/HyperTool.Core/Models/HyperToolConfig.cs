@@ -18,6 +18,8 @@ public sealed class HyperToolConfig
 
     public UpdateSettings Update { get; set; } = new();
 
+    public UsbSettings Usb { get; set; } = new();
+
     public static HyperToolConfig CreateDefault() => new();
 }
 
@@ -58,4 +60,9 @@ public sealed class UpdateSettings
     public string GitHubOwner { get; set; } = "koerby";
 
     public string GitHubRepo { get; set; } = "HyperTool";
+}
+
+public sealed class UsbSettings
+{
+    public List<string> AutoShareDeviceKeys { get; set; } = [];
 }

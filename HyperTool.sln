@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HyperTool.Core", "src\Hyper
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HyperTool.WinUI", "src\HyperTool.WinUI\HyperTool.WinUI.csproj", "{860DBD00-6715-4FC0-A2AF-C840D4D18DB4}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HyperTool.Guest", "src\HyperTool.Guest\HyperTool.Guest.csproj", "{61EE9820-6256-4BE4-8BA7-674A6403BDC9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -43,6 +45,18 @@ Global
 		{860DBD00-6715-4FC0-A2AF-C840D4D18DB4}.Release|x64.Build.0 = Release|Any CPU
 		{860DBD00-6715-4FC0-A2AF-C840D4D18DB4}.Release|x86.ActiveCfg = Release|Any CPU
 		{860DBD00-6715-4FC0-A2AF-C840D4D18DB4}.Release|x86.Build.0 = Release|Any CPU
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9}.Debug|x64.Build.0 = Debug|Any CPU
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9}.Debug|x86.Build.0 = Debug|Any CPU
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9}.Release|x64.ActiveCfg = Release|Any CPU
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9}.Release|x64.Build.0 = Release|Any CPU
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9}.Release|x86.ActiveCfg = Release|Any CPU
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -50,5 +64,6 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{86EF43B8-4A67-4625-9086-B32CB7AF7AEF} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{860DBD00-6715-4FC0-A2AF-C840D4D18DB4} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{61EE9820-6256-4BE4-8BA7-674A6403BDC9} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

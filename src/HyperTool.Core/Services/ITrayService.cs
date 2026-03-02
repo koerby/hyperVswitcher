@@ -25,6 +25,10 @@ public interface ITrayService : IDisposable
         Func<string, Task> createSnapshotAction,
         Func<string, string, Task> connectVmToSwitchAction,
         Func<string, Task> disconnectVmSwitchAction,
+        Func<UsbIpDeviceInfo?> getSelectedUsbDevice,
+        Func<Task> refreshUsbDevicesAction,
+        Func<Task> shareSelectedUsbAction,
+        Func<Task> unshareSelectedUsbAction,
         Action exitAction);
 
     void UpdateTrayMenu();

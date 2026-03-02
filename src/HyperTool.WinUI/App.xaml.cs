@@ -35,6 +35,7 @@ public sealed partial class App : Application
     private bool _singleInstanceOwned;
     private bool _pendingSingleInstanceShow;
     private bool _isThemeWindowReopenInProgress;
+    private bool _usbShutdownCleanupDone;
 
     private MainWindow? _mainWindow;
     private MainViewModel? _mainViewModel;
@@ -110,6 +111,7 @@ public sealed partial class App : Application
             IHnsService hnsService = new HnsService();
             IStartupService startupService = new StartupService();
             IUpdateService updateService = new GitHubUpdateService();
+            IUsbIpService usbIpService = new UsbIpdCliService();
             _themeService = new ThemeService();
             IUiInteropService uiInteropService = new UiInteropService();
 
@@ -134,6 +136,7 @@ public sealed partial class App : Application
                 configService,
                 startupService,
                 updateService,
+                usbIpService,
                 uiInteropService);
 
             _mainWindow = new MainWindow(_themeService, _mainViewModel, showStartupSplash: true);
@@ -199,12 +202,14 @@ public sealed partial class App : Application
             window.AppWindow.Hide();
         };
 
-        window.Closed += (_, _) =>
+        window.Closed += async (_, _) =>
         {
             if (_isThemeWindowReopenInProgress)
             {
                 return;
             }
+
+            await ExecuteUsbShutdownCleanupAsync();
 
             _trayControlCenterService?.Dispose();
             _trayControlCenterService = null;
@@ -503,7 +508,10 @@ public sealed partial class App : Application
                 },
                 getUiTheme: () => mainViewModel.UiTheme,
                 getVms: () => mainViewModel.GetTrayVms(),
+                getVmAdapters: vmName => mainViewModel.GetVmNetworkAdaptersForTrayAsync(vmName),
                 getSwitches: () => mainViewModel.GetTraySwitches(),
+                getUsbDevices: () => mainViewModel.GetUsbDevicesForTray(),
+                selectUsbDeviceAction: busId => mainViewModel.SelectUsbDeviceForTrayAsync(busId),
                 isTrayMenuEnabled: () => mainViewModel.UiEnableTrayMenu,
                 refreshTrayDataAction: () => mainViewModel.RefreshTrayDataAsync(),
                 startVmAction: vmName => mainViewModel.StartVmFromTrayAsync(vmName),
@@ -511,7 +519,11 @@ public sealed partial class App : Application
                 restartVmAction: vmName => mainViewModel.RestartVmByNameCommand.ExecuteAsync(vmName),
                 openConsoleAction: vmName => mainViewModel.OpenConsoleFromTrayAsync(vmName),
                 createSnapshotAction: vmName => mainViewModel.CreateSnapshotFromTrayAsync(vmName),
-                connectVmToSwitchAction: (vmName, switchName) => mainViewModel.ConnectVmSwitchFromTrayAsync(vmName, switchName),
+                connectVmToSwitchAction: (vmName, switchName, adapterName) => mainViewModel.ConnectVmSwitchFromTrayAsync(vmName, switchName, adapterName),
+                getSelectedUsbDevice: () => mainViewModel.GetSelectedUsbDeviceForTray(),
+                refreshUsbDevicesAction: () => mainViewModel.RefreshUsbDevicesFromTrayAsync(),
+                shareSelectedUsbAction: () => mainViewModel.ShareSelectedUsbFromTrayAsync(),
+                unshareSelectedUsbAction: () => mainViewModel.UnshareSelectedUsbFromTrayAsync(),
                 exitAction: requestExit);
 
             _trayService = new HyperTool.WinUI.Services.TrayService();
@@ -550,6 +562,10 @@ public sealed partial class App : Application
                 createSnapshotAction: vmName => mainViewModel.CreateSnapshotFromTrayAsync(vmName),
                 connectVmToSwitchAction: (vmName, switchName) => mainViewModel.ConnectVmSwitchFromTrayAsync(vmName, switchName),
                 disconnectVmSwitchAction: vmName => mainViewModel.DisconnectVmSwitchFromTrayAsync(vmName),
+                getSelectedUsbDevice: () => mainViewModel.GetSelectedUsbDeviceForTray(),
+                refreshUsbDevicesAction: () => mainViewModel.RefreshUsbDevicesFromTrayAsync(),
+                shareSelectedUsbAction: () => mainViewModel.ShareSelectedUsbFromTrayAsync(),
+                unshareSelectedUsbAction: () => mainViewModel.UnshareSelectedUsbFromTrayAsync(),
                 exitAction: requestExit);
 
             _isTrayFunctional = true;
@@ -601,6 +617,8 @@ public sealed partial class App : Application
             {
             }
 
+            await ExecuteUsbShutdownCleanupAsync();
+
             _trayControlCenterService?.Dispose();
             _trayControlCenterService = null;
             _trayService?.Dispose();
@@ -625,6 +643,30 @@ public sealed partial class App : Application
             }
 
             _isExitSequenceRunning = false;
+        }
+    }
+
+    private async Task ExecuteUsbShutdownCleanupAsync()
+    {
+        if (_usbShutdownCleanupDone)
+        {
+            return;
+        }
+
+        _usbShutdownCleanupDone = true;
+
+        if (_mainViewModel is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _mainViewModel.UnshareAllSharedUsbOnShutdownAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "USB cleanup on shutdown failed.");
         }
     }
 

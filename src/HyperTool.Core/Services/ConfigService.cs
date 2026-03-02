@@ -214,6 +214,7 @@ public sealed class ConfigService : IConfigService
         config.Hns ??= new HnsSettings();
         config.Ui ??= new UiSettings();
         config.Update ??= new UpdateSettings();
+        config.Usb ??= new UsbSettings();
 
         if (config.Ui.TrayVmNames is null)
         {
@@ -234,6 +235,27 @@ public sealed class ConfigService : IConfigService
             }
 
             config.Ui.TrayVmNames = normalizedTrayVmNames;
+        }
+
+        if (config.Usb.AutoShareDeviceKeys is null)
+        {
+            config.Usb.AutoShareDeviceKeys = [];
+            wasUpdated = true;
+        }
+        else
+        {
+            var normalizedAutoShareKeys = config.Usb.AutoShareDeviceKeys
+                .Where(key => !string.IsNullOrWhiteSpace(key))
+                .Select(key => key.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (normalizedAutoShareKeys.Count != config.Usb.AutoShareDeviceKeys.Count)
+            {
+                wasUpdated = true;
+            }
+
+            config.Usb.AutoShareDeviceKeys = normalizedAutoShareKeys;
         }
 
         if (string.IsNullOrWhiteSpace(config.Ui.WindowTitle))

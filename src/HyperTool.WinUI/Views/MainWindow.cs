@@ -46,13 +46,20 @@ public sealed class MainWindow : Window
     private readonly Grid _notificationExpandedGrid = new() { Visibility = Visibility.Collapsed };
     private readonly ListView _notificationsListView = new();
     private readonly Button _toggleLogButton = new();
-    private readonly ListView _checkpointListView = new();
+    private readonly TreeView _checkpointTreeView = new();
+    private readonly ListView _usbDevicesListView = new();
+    private readonly CheckBox _usbAutoShareCheckBox = new();
+    private TextBox? _usbWslDistributionTextBox;
     private readonly StackPanel _vmAdapterCardsPanel = new() { Spacing = 10 };
+    private readonly Dictionary<string, TreeViewNode> _checkpointNodesById = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<TreeViewNode, HyperVCheckpointTreeItem> _checkpointItemsByNode = [];
+    private bool _isUpdatingCheckpointTreeSelection;
     private readonly RotateTransform _logoRotateTransform = new();
     private UIElement? _vmPage;
     private UIElement? _snapshotsPage;
     private UIElement? _configPage;
     private UIElement? _infoPage;
+    private UIElement? _usbPage;
     private HelpWindow? _helpWindow;
     private HostNetworkWindow? _hostNetworkWindow;
     private Grid? _windowHost;
@@ -106,6 +113,7 @@ public sealed class MainWindow : Window
         _viewModel.AvailableVms.CollectionChanged += OnAvailableVmsCollectionChanged;
         _viewModel.AvailableVmNetworkAdapters.CollectionChanged += OnVmNetworkAdaptersCollectionChanged;
         _viewModel.AvailableSwitches.CollectionChanged += OnVmNetworkAdaptersCollectionChanged;
+        _viewModel.AvailableCheckpointTree.CollectionChanged += OnCheckpointTreeCollectionChanged;
         _themeService.ApplyTheme(_viewModel.UiTheme);
         ApplyRequestedTheme();
         UpdateTitleBarAppearance();
@@ -1349,9 +1357,10 @@ public sealed class MainWindow : Window
         };
         var sidebarStack = new StackPanel { Spacing = 8 };
         sidebarStack.Children.Add(CreateNavButton("▶", "VM", 0));
-        sidebarStack.Children.Add(CreateNavButton("📷", "Snapshots", 1));
-        sidebarStack.Children.Add(CreateNavButton("⚙", "Einstellungen", 2));
-        sidebarStack.Children.Add(CreateNavButton("ℹ", "Info", 3));
+        sidebarStack.Children.Add(CreateNavButton("🔌", "USB", 1));
+        sidebarStack.Children.Add(CreateNavButton("📷", "Snapshots", 2));
+        sidebarStack.Children.Add(CreateNavButton("⚙", "Einstellungen", 3));
+        sidebarStack.Children.Add(CreateNavButton("ℹ", "Info", 4));
         sidebar.Child = sidebarStack;
         mainGrid.Children.Add(sidebar);
 
@@ -1616,23 +1625,28 @@ public sealed class MainWindow : Window
             Padding = new Thickness(8)
         };
 
-        _checkpointListView.ItemsSource = _viewModel.AvailableCheckpoints;
-        _checkpointListView.SelectionMode = ListViewSelectionMode.Single;
-        _checkpointListView.IsItemClickEnabled = true;
-        _checkpointListView.DisplayMemberPath = nameof(HyperVCheckpointInfo.Name);
-        _checkpointListView.ItemClick += (_, args) =>
+        _checkpointTreeView.SelectionMode = TreeViewSelectionMode.Single;
+        _checkpointTreeView.SelectionChanged += (_, args) =>
         {
-            if (args.ClickedItem is HyperVCheckpointInfo checkpoint)
+            if (_isUpdatingCheckpointTreeSelection)
             {
-                _viewModel.SelectedCheckpoint = checkpoint;
+                return;
+            }
 
-                var selectedNode = _viewModel.AvailableCheckpointTree
-                    .SelectMany(FlattenCheckpointTree)
-                    .FirstOrDefault(node => node.Checkpoint.Id == checkpoint.Id);
-                _viewModel.SelectedCheckpointNode = selectedNode;
+            var selectedObject = args.AddedItems.FirstOrDefault();
+            var selectedItem = selectedObject is TreeViewNode selectedNode
+                               && _checkpointItemsByNode.TryGetValue(selectedNode, out var nodeItem)
+                ? nodeItem
+                : null;
+
+            if (selectedItem is not null)
+            {
+                _viewModel.SelectedCheckpointNode = selectedItem;
             }
         };
-        listBorder.Child = _checkpointListView;
+
+        RefreshCheckpointTreeView();
+        listBorder.Child = _checkpointTreeView;
         panel.Children.Add(listBorder);
 
         var createGrid = new Grid { ColumnSpacing = 8 };
@@ -2001,13 +2015,97 @@ public sealed class MainWindow : Window
         return new ScrollViewer { Content = root };
     }
 
-    private static IEnumerable<HyperVCheckpointTreeItem> FlattenCheckpointTree(HyperVCheckpointTreeItem root)
+    private void RefreshCheckpointTreeView()
     {
-        yield return root;
+        _checkpointTreeView.RootNodes.Clear();
+        _checkpointNodesById.Clear();
+        _checkpointItemsByNode.Clear();
 
-        foreach (var child in root.Children.SelectMany(FlattenCheckpointTree))
+        foreach (var root in _viewModel.AvailableCheckpointTree)
         {
-            yield return child;
+            _checkpointTreeView.RootNodes.Add(CreateCheckpointTreeNode(root));
+        }
+
+        SelectCheckpointNodeInTree(_viewModel.SelectedCheckpointNode);
+    }
+
+    private TreeViewNode CreateCheckpointTreeNode(HyperVCheckpointTreeItem item)
+    {
+        var node = new TreeViewNode
+        {
+            Content = BuildCheckpointNodeText(item),
+            IsExpanded = true,
+            HasUnrealizedChildren = false
+        };
+
+        _checkpointItemsByNode[node] = item;
+
+        if (!string.IsNullOrWhiteSpace(item.Checkpoint.Id)
+            && !_checkpointNodesById.ContainsKey(item.Checkpoint.Id))
+        {
+            _checkpointNodesById[item.Checkpoint.Id] = node;
+        }
+
+        foreach (var child in item.Children)
+        {
+            node.Children.Add(CreateCheckpointTreeNode(child));
+        }
+
+        return node;
+    }
+
+    private static string BuildCheckpointNodeText(HyperVCheckpointTreeItem item)
+    {
+        var title = string.IsNullOrWhiteSpace(item.Name) ? "(Ohne Namen)" : item.Name;
+        var markers = new List<string>();
+
+        if (item.IsCurrent)
+        {
+            markers.Add("Aktuell");
+        }
+
+        if (item.IsLatest)
+        {
+            markers.Add("Neueste");
+        }
+
+        var createdText = item.Created == default ? "-" : item.Created.ToString("dd.MM.yyyy - HH:mm:ss");
+
+        if (markers.Count == 0)
+        {
+            return $"{title}\n🕒 {createdText}";
+        }
+
+        var badgeLine = string.Join("   ", markers.Select(marker =>
+            string.Equals(marker, "Aktuell", StringComparison.OrdinalIgnoreCase)
+                ? "● Aktuell"
+                : "◆ Neueste"));
+        return $"{title}\n{badgeLine}\n🕒 {createdText}";
+    }
+
+    private void SelectCheckpointNodeInTree(HyperVCheckpointTreeItem? item)
+    {
+        _isUpdatingCheckpointTreeSelection = true;
+        try
+        {
+            if (item is null || string.IsNullOrWhiteSpace(item.Checkpoint.Id))
+            {
+                _checkpointTreeView.SelectedNode = null;
+                return;
+            }
+
+            if (_checkpointNodesById.TryGetValue(item.Checkpoint.Id, out var node))
+            {
+                _checkpointTreeView.SelectedNode = node;
+            }
+            else
+            {
+                _checkpointTreeView.SelectedNode = null;
+            }
+        }
+        finally
+        {
+            _isUpdatingCheckpointTreeSelection = false;
         }
     }
 
@@ -2042,7 +2140,7 @@ public sealed class MainWindow : Window
         };
 
         var infoStack = new StackPanel { Spacing = 6 };
-        infoStack.Children.Add(new TextBlock { Text = "Projekt", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        infoStack.Children.Add(new TextBlock { Text = "HyperTool Projekt", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         infoStack.Children.Add(new TextBlock { Text = "HyperTool wird über GitHub Releases verteilt. Hier findest du Version, Update-Status und Release-Links.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
 
         var linksGrid = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 8, 0, 0) };
@@ -2067,13 +2165,144 @@ public sealed class MainWindow : Window
         infoCard.Child = infoStack;
         panel.Children.Add(infoCard);
 
+        var usbipdCard = new Border
+        {
+            BorderThickness = new Thickness(1),
+            BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
+            Background = Application.Current.Resources["PageBackgroundBrush"] as Brush,
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(10)
+        };
+
+        var usbipdInfoStack = new StackPanel { Spacing = 6 };
+        usbipdInfoStack.Children.Add(new TextBlock { Text = "Externe USB/IP Quelle", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        usbipdInfoStack.Children.Add(new TextBlock { Text = "Quelle: dorssel/usbipd-win", Opacity = 0.9 });
+        usbipdInfoStack.Children.Add(new TextBlock { Text = "Nutzung in HyperTool: externer CLI-/Dienst-Stack für USB-Funktionen in der Host-App.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
+        usbipdInfoStack.Children.Add(new TextBlock { Text = "Lizenz/Eigentümer: siehe Original-Repository von dorssel.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
+        usbipdCard.Child = usbipdInfoStack;
+        panel.Children.Add(usbipdCard);
+
         var buttonRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         buttonRow.Children.Add(CreateIconButton("🛰", "Update prüfen", _viewModel.CheckForUpdatesCommand));
         buttonRow.Children.Add(CreateIconButton("⬇", "Update installieren", _viewModel.InstallUpdateCommand));
         buttonRow.Children.Add(CreateIconButton("🌐", "Changelog / Release", _viewModel.OpenReleasePageCommand));
+        buttonRow.Children.Add(CreateIconButton("🔗", "usbipd-win Quelle", onClick: (_, _) =>
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "https://github.com/dorssel/usbipd-win",
+                UseShellExecute = true
+            });
+        }));
         panel.Children.Add(buttonRow);
 
         return new ScrollViewer { Content = panel };
+    }
+
+    private UIElement BuildUsbPage()
+    {
+        var root = new Grid { RowSpacing = 10 };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        var actionsCard = new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            BorderThickness = new Thickness(1),
+            BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
+            Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
+            Padding = new Thickness(10)
+        };
+
+        var actionsStack = new StackPanel { Spacing = 8 };
+        actionsStack.Children.Add(new TextBlock
+        {
+            Text = "USB Share (usbipd CLI Bridge)",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+        });
+
+        var usbRuntimeHintText = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.9,
+            Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
+        };
+        usbRuntimeHintText.SetBinding(TextBlock.TextProperty, new Binding { Source = _viewModel, Path = new PropertyPath(nameof(MainViewModel.UsbRuntimeHintText)) });
+        actionsStack.Children.Add(usbRuntimeHintText);
+
+        var actionRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        actionRow.Children.Add(CreateIconButton("⟳", "Refresh", _viewModel.RefreshUsbDevicesCommand));
+        actionRow.Children.Add(CreateIconButton("🔓", "Share", _viewModel.BindUsbDeviceCommand));
+        actionRow.Children.Add(CreateIconButton("🔒", "Unshare", _viewModel.UnbindUsbDeviceCommand));
+        actionRow.Children.Add(CreateIconButton("🧩", "Attach WSL", _viewModel.AttachUsbToWslCommand));
+        actionRow.Children.Add(CreateIconButton("⏏", "Detach", _viewModel.DetachUsbDeviceCommand));
+        actionsStack.Children.Add(actionRow);
+
+        var distributionRow = new Grid { ColumnSpacing = 8 };
+        distributionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(130) });
+        distributionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        distributionRow.Children.Add(new TextBlock
+        {
+            Text = "WSL Distro",
+            VerticalAlignment = VerticalAlignment.Center,
+            Opacity = 0.9,
+            Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
+        });
+
+        var distroTextBox = CreateStyledTextBox(_viewModel.UsbWslDistribution, "leer = default WSL Distribution");
+        distroTextBox.IsEnabled = _viewModel.UsbRuntimeAvailable;
+        _usbWslDistributionTextBox = distroTextBox;
+        distroTextBox.TextChanged += (_, _) => _viewModel.UsbWslDistribution = distroTextBox.Text;
+        Grid.SetColumn(distroTextBox, 1);
+        distributionRow.Children.Add(distroTextBox);
+        actionsStack.Children.Add(distributionRow);
+
+        _usbAutoShareCheckBox.Content = "Auto-Share für ausgewähltes Gerät";
+        _usbAutoShareCheckBox.IsChecked = _viewModel.SelectedUsbDeviceAutoShareEnabled;
+        _usbAutoShareCheckBox.IsEnabled = _viewModel.SelectedUsbDevice is not null && _viewModel.UsbRuntimeAvailable;
+        _usbAutoShareCheckBox.Checked += (_, _) => _viewModel.SelectedUsbDeviceAutoShareEnabled = true;
+        _usbAutoShareCheckBox.Unchecked += (_, _) => _viewModel.SelectedUsbDeviceAutoShareEnabled = false;
+        actionsStack.Children.Add(_usbAutoShareCheckBox);
+
+        actionsCard.Child = actionsStack;
+        root.Children.Add(actionsCard);
+
+        var statusText = new TextBlock { Opacity = 0.85, Margin = new Thickness(2, 0, 0, 0) };
+        statusText.SetBinding(TextBlock.TextProperty, new Binding { Source = _viewModel, Path = new PropertyPath(nameof(MainViewModel.UsbStatusText)) });
+        Grid.SetRow(statusText, 1);
+        root.Children.Add(statusText);
+
+        var listCard = new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            BorderThickness = new Thickness(1),
+            BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
+            Background = Application.Current.Resources["PanelBackgroundBrush"] as Brush,
+            Padding = new Thickness(8)
+        };
+
+        _usbDevicesListView.ItemsSource = _viewModel.UsbDevices;
+        _usbDevicesListView.DisplayMemberPath = nameof(UsbIpDeviceInfo.DisplayName);
+        _usbDevicesListView.SelectionMode = ListViewSelectionMode.Single;
+        _usbDevicesListView.IsItemClickEnabled = true;
+        _usbDevicesListView.ItemClick += (_, args) =>
+        {
+            if (args.ClickedItem is UsbIpDeviceInfo usbDevice)
+            {
+                _viewModel.SelectedUsbDevice = usbDevice;
+            }
+        };
+        _usbDevicesListView.SelectionChanged += (_, _) =>
+        {
+            _viewModel.SelectedUsbDevice = _usbDevicesListView.SelectedItem as UsbIpDeviceInfo;
+        };
+
+        listCard.Child = _usbDevicesListView;
+        Grid.SetRow(listCard, 2);
+        root.Children.Add(listCard);
+
+        return new ScrollViewer { Content = root };
     }
 
     private static CheckBox CreateCheckBox(string text, Func<bool> getter, Action<bool> setter)
@@ -2276,7 +2505,7 @@ public sealed class MainWindow : Window
         var button = new Button
         {
             Padding = new Thickness(8, 8, 8, 8),
-            MinHeight = 76,
+            MinHeight = 78,
             CornerRadius = new CornerRadius(10),
             BorderThickness = new Thickness(1),
             BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
@@ -2287,8 +2516,8 @@ public sealed class MainWindow : Window
         var content = new StackPanel { Spacing = 4, HorizontalAlignment = HorizontalAlignment.Center };
         var navIconHost = new Grid
         {
-            Width = 30,
-            Height = 30,
+            Width = 36,
+            Height = 36,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center
         };
@@ -2299,7 +2528,7 @@ public sealed class MainWindow : Window
             Child = new TextBlock
             {
                 Text = icon,
-                FontSize = 20,
+                FontSize = 24,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 TextAlignment = TextAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -2586,9 +2815,10 @@ public sealed class MainWindow : Window
         {
             var content = _viewModel.SelectedMenuIndex switch
             {
-                1 => _snapshotsPage ??= BuildSnapshotsPage(),
-                2 => _configPage ??= BuildConfigPage(),
-                3 => _infoPage ??= BuildInfoPage(),
+                1 => _usbPage ??= BuildUsbPage(),
+                2 => _snapshotsPage ??= BuildSnapshotsPage(),
+                3 => _configPage ??= BuildConfigPage(),
+                4 => _infoPage ??= BuildInfoPage(),
                 _ => _vmPage ??= BuildVmPage()
             };
 
@@ -2692,6 +2922,7 @@ public sealed class MainWindow : Window
         _viewModel.AvailableVms.CollectionChanged -= OnAvailableVmsCollectionChanged;
         _viewModel.AvailableVmNetworkAdapters.CollectionChanged -= OnVmNetworkAdaptersCollectionChanged;
         _viewModel.AvailableSwitches.CollectionChanged -= OnVmNetworkAdaptersCollectionChanged;
+        _viewModel.AvailableCheckpointTree.CollectionChanged -= OnCheckpointTreeCollectionChanged;
     }
 
     private void OnAvailableVmsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -2707,6 +2938,14 @@ public sealed class MainWindow : Window
         RunOnUiThread(() =>
         {
             RefreshVmAdapterCards();
+        });
+    }
+
+    private void OnCheckpointTreeCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        RunOnUiThread(() =>
+        {
+            RefreshCheckpointTreeView();
         });
     }
 
@@ -2772,6 +3011,32 @@ public sealed class MainWindow : Window
             || string.Equals(e.PropertyName, nameof(MainViewModel.LastNotificationText), StringComparison.Ordinal))
         {
             UpdateBusyAndNotificationPanel();
+        }
+
+        if (string.Equals(e.PropertyName, nameof(MainViewModel.SelectedUsbDevice), StringComparison.Ordinal)
+            && _usbDevicesListView.SelectedItem != _viewModel.SelectedUsbDevice)
+        {
+            _usbDevicesListView.SelectedItem = _viewModel.SelectedUsbDevice;
+            _usbAutoShareCheckBox.IsEnabled = _viewModel.SelectedUsbDevice is not null && _viewModel.UsbRuntimeAvailable;
+        }
+
+        if (string.Equals(e.PropertyName, nameof(MainViewModel.UsbRuntimeAvailable), StringComparison.Ordinal))
+        {
+            _usbAutoShareCheckBox.IsEnabled = _viewModel.SelectedUsbDevice is not null && _viewModel.UsbRuntimeAvailable;
+            if (_usbWslDistributionTextBox is not null)
+            {
+                _usbWslDistributionTextBox.IsEnabled = _viewModel.UsbRuntimeAvailable;
+            }
+        }
+
+        if (string.Equals(e.PropertyName, nameof(MainViewModel.SelectedUsbDeviceAutoShareEnabled), StringComparison.Ordinal))
+        {
+            _usbAutoShareCheckBox.IsChecked = _viewModel.SelectedUsbDeviceAutoShareEnabled;
+        }
+
+        if (string.Equals(e.PropertyName, nameof(MainViewModel.SelectedCheckpointNode), StringComparison.Ordinal))
+        {
+            SelectCheckpointNodeInTree(_viewModel.SelectedCheckpointNode);
         }
     }
 
@@ -2849,6 +3114,7 @@ public sealed class MainWindow : Window
         _snapshotsPage = null;
         _configPage = null;
         _infoPage = null;
+        _usbPage = null;
         SetWindowMainContent(BuildLayout());
         ApplyRequestedTheme();
         UpdateTitleBarAppearance();

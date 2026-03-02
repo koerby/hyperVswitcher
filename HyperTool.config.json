@@ -22,5 +22,8 @@
     "checkOnStartup": true,
     "gitHubOwner": "koerby",
     "gitHubRepo": "HyperTool"
+  },
+  "usb": {
+    "autoShareDeviceKeys": []
   }
 }

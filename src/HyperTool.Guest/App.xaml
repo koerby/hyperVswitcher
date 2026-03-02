@@ -1,0 +1,17 @@
+<Application
+    x:Class="HyperTool.Guest.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <SolidColorBrush x:Key="PageBackgroundBrush" Color="#0D1630" />
+        <SolidColorBrush x:Key="PanelBorderBrush" Color="#4E6F9F" />
+        <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#1A2745" />
+        <SolidColorBrush x:Key="SurfaceSoftBrush" Color="#25365A" />
+        <SolidColorBrush x:Key="SurfaceTopBrush" Color="#223357" />
+        <SolidColorBrush x:Key="SurfaceBottomBrush" Color="#1A2947" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#56AAF3" />
+        <SolidColorBrush x:Key="AccentSoftBrush" Color="#334E85C6" />
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#E8F1FF" />
+        <SolidColorBrush x:Key="TextMutedBrush" Color="#A9BED9" />
+    </Application.Resources>
+</Application>

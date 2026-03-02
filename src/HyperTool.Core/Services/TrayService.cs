@@ -32,6 +32,10 @@ public sealed class TrayService : ITrayService
     private Func<string, Task>? _createSnapshotAction;
     private Func<string, string, Task>? _connectVmToSwitchAction;
     private Func<string, Task>? _disconnectVmSwitchAction;
+    private Func<UsbIpDeviceInfo?>? _getSelectedUsbDevice;
+    private Func<Task>? _refreshUsbDevicesAction;
+    private Func<Task>? _shareSelectedUsbAction;
+    private Func<Task>? _unshareSelectedUsbAction;
     private Action? _exitAction;
     private EventHandler? _trayStateChangedHandler;
     private Action<EventHandler>? _unsubscribeTrayStateChanged;
@@ -82,6 +86,10 @@ public sealed class TrayService : ITrayService
         Func<string, Task> createSnapshotAction,
         Func<string, string, Task> connectVmToSwitchAction,
         Func<string, Task> disconnectVmSwitchAction,
+        Func<UsbIpDeviceInfo?> getSelectedUsbDevice,
+        Func<Task> refreshUsbDevicesAction,
+        Func<Task> shareSelectedUsbAction,
+        Func<Task> unshareSelectedUsbAction,
         Action exitAction)
     {
         _showAction = showAction;
@@ -102,6 +110,10 @@ public sealed class TrayService : ITrayService
         _createSnapshotAction = createSnapshotAction;
         _connectVmToSwitchAction = connectVmToSwitchAction;
         _disconnectVmSwitchAction = disconnectVmSwitchAction;
+        _getSelectedUsbDevice = getSelectedUsbDevice;
+        _refreshUsbDevicesAction = refreshUsbDevicesAction;
+        _shareSelectedUsbAction = shareSelectedUsbAction;
+        _unshareSelectedUsbAction = unshareSelectedUsbAction;
         _exitAction = exitAction;
         _unsubscribeTrayStateChanged = unsubscribeTrayStateChanged;
 
@@ -243,6 +255,75 @@ public sealed class TrayService : ITrayService
 
             return Task.CompletedTask;
         }, "toggle-visibility")));
+
+        if (_toggleControlCenterAction is not null || _toggleControlCenterCompactAction is not null)
+        {
+            _contextMenu.Items.Add(CreateMenuItem("Control Center", "☰", (_, _) => ExecuteMenuAction(() =>
+            {
+                if (IsTrayMenuEnabled())
+                {
+                    _toggleControlCenterAction?.Invoke();
+                }
+                else
+                {
+                    _toggleControlCenterCompactAction?.Invoke();
+                }
+
+                return Task.CompletedTask;
+            }, "toggle-control-center")));
+        }
+
+        var usbMenu = CreateMenuItem("USB", "🔌");
+        usbMenu.DropDownItems.Add(CreateMenuItem("Refresh", "⟳", (_, _) => ExecuteMenuAction(async () =>
+        {
+            if (_refreshUsbDevicesAction is null)
+            {
+                return;
+            }
+
+            await _refreshUsbDevicesAction();
+        }, "usb-refresh")));
+
+        var selectedUsbDevice = _getSelectedUsbDevice?.Invoke();
+        var selectedBusId = selectedUsbDevice?.BusId?.Trim() ?? string.Empty;
+        var hasSelectedBusId = !string.IsNullOrWhiteSpace(selectedBusId);
+        var selectedDeviceName = selectedUsbDevice?.Description?.Trim() ?? string.Empty;
+        var selectedDeviceNameShort = TruncateWithEllipsis(selectedDeviceName, 42);
+        var selectedStateText = selectedUsbDevice?.IsShared == true ? "Shared" : "Not shared";
+        var selectedText = hasSelectedBusId
+            ? $"Selected: {(string.IsNullOrWhiteSpace(selectedDeviceNameShort) ? "-" : selectedDeviceNameShort)} ({selectedStateText})"
+            : "Selected: -";
+
+        usbMenu.DropDownItems.Add(new ToolStripMenuItem(selectedText)
+        {
+            Enabled = false
+        });
+
+        var shareItem = CreateMenuItem("Share selected", "🔓", (_, _) => ExecuteMenuAction(async () =>
+        {
+            if (_shareSelectedUsbAction is null)
+            {
+                return;
+            }
+
+            await _shareSelectedUsbAction();
+        }, "usb-share-selected"));
+        shareItem.Enabled = hasSelectedBusId && selectedUsbDevice?.IsShared != true;
+        usbMenu.DropDownItems.Add(shareItem);
+
+        var unshareItem = CreateMenuItem("Unshare selected", "🔒", (_, _) => ExecuteMenuAction(async () =>
+        {
+            if (_unshareSelectedUsbAction is null)
+            {
+                return;
+            }
+
+            await _unshareSelectedUsbAction();
+        }, "usb-unshare-selected"));
+        unshareItem.Enabled = hasSelectedBusId && selectedUsbDevice?.IsShared == true;
+        usbMenu.DropDownItems.Add(unshareItem);
+
+        _contextMenu.Items.Add(usbMenu);
 
         _contextMenu.Items.Add(new ToolStripSeparator());
 
@@ -1403,6 +1484,26 @@ public sealed class TrayService : ITrayService
         {
             return null;
         }
+    }
+
+    private static string TruncateWithEllipsis(string value, int maxLength)
+    {
+        if (maxLength <= 0)
+        {
+            return string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(value) || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        if (maxLength <= 1)
+        {
+            return "…";
+        }
+
+        return value[..(maxLength - 1)].TrimEnd() + "…";
     }
 
     private sealed record VmSelectionItem(string Name, string Label, string RuntimeSwitchName, string RuntimeState)

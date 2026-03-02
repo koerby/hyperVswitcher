@@ -9,13 +9,14 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
+using System.Security.Principal;
 
 namespace HyperTool.ViewModels;
 
 public partial class MainViewModel : ViewModelBase
 {
     private const string NotConnectedSwitchDisplay = "Nicht verbunden";
-    private const int ConfigMenuIndex = 2;
+    private const int ConfigMenuIndex = 3;
 
     [ObservableProperty]
     private string _windowTitle = "HyperTool";
@@ -167,6 +168,23 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private bool _hasPendingConfigChanges;
 
+    [ObservableProperty]
+    private UsbIpDeviceInfo? _selectedUsbDevice;
+
+    [ObservableProperty]
+    private string _usbWslDistribution = string.Empty;
+
+    [ObservableProperty]
+    private string _usbStatusText = "Noch nicht geladen";
+    [ObservableProperty]
+    private bool _usbRuntimeAvailable = true;
+
+    [ObservableProperty]
+    private string _usbRuntimeHintText = string.Empty;
+
+    [ObservableProperty]
+    private bool _selectedUsbDeviceAutoShareEnabled;
+
     public ObservableCollection<VmDefinition> AvailableVms { get; } = [];
 
     public ObservableCollection<HyperVSwitchInfo> AvailableSwitches { get; } = [];
@@ -182,6 +200,8 @@ public partial class MainViewModel : ViewModelBase
     public ObservableCollection<HyperVCheckpointTreeItem> AvailableCheckpointTree { get; } = [];
 
     public ObservableCollection<UiNotification> Notifications { get; } = [];
+
+    public ObservableCollection<UsbIpDeviceInfo> UsbDevices { get; } = [];
 
     public string DefaultSwitchName { get; }
 
@@ -318,11 +338,22 @@ public partial class MainViewModel : ViewModelBase
 
     public IAsyncRelayCommand<string> CreateSnapshotByNameCommand { get; }
 
+    public IAsyncRelayCommand RefreshUsbDevicesCommand { get; }
+
+    public IAsyncRelayCommand BindUsbDeviceCommand { get; }
+
+    public IAsyncRelayCommand UnbindUsbDeviceCommand { get; }
+
+    public IAsyncRelayCommand AttachUsbToWslCommand { get; }
+
+    public IAsyncRelayCommand DetachUsbDeviceCommand { get; }
+
     private readonly IHyperVService _hyperVService;
     private readonly IHnsService _hnsService;
     private readonly IConfigService _configService;
     private readonly IStartupService _startupService;
     private readonly IUpdateService _updateService;
+    private readonly IUsbIpService _usbIpService;
     private readonly IUiInteropService _uiInteropService;
     private readonly string _configPath;
 
@@ -334,6 +365,8 @@ public partial class MainViewModel : ViewModelBase
     private int _configChangeSuppressionDepth;
     private int _lastSelectedMenuIndex;
     private bool _isHandlingMenuSelectionChange;
+    private bool _suppressUsbAutoShareToggleHandling;
+    private readonly HashSet<string> _usbAutoShareDeviceKeys = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HttpClient UpdateDownloadClient = new();
 
     public event EventHandler? TrayStateChanged;
@@ -347,6 +380,7 @@ public partial class MainViewModel : ViewModelBase
         IConfigService configService,
         IStartupService startupService,
         IUpdateService updateService,
+        IUsbIpService usbIpService,
         IUiInteropService uiInteropService)
     {
         _hyperVService = hyperVService;
@@ -354,6 +388,7 @@ public partial class MainViewModel : ViewModelBase
         _configService = configService;
         _startupService = startupService;
         _updateService = updateService;
+        _usbIpService = usbIpService;
         _uiInteropService = uiInteropService;
         _configPath = configResult.ConfigPath;
 
@@ -377,6 +412,14 @@ public partial class MainViewModel : ViewModelBase
         UpdateCheckOnStartup = configResult.Config.Update.CheckOnStartup;
         GithubOwner = configResult.Config.Update.GitHubOwner;
         GithubRepo = configResult.Config.Update.GitHubRepo;
+        _usbAutoShareDeviceKeys.Clear();
+        foreach (var key in configResult.Config.Usb.AutoShareDeviceKeys)
+        {
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                _usbAutoShareDeviceKeys.Add(key.Trim());
+            }
+        }
         ApplyConfiguredVmDefinitions(configResult.Config.Vms);
         _trayVmNames = NormalizeTrayVmNames(configResult.Config.Ui.TrayVmNames);
         AppVersion = ResolveAppVersion();
@@ -438,6 +481,12 @@ public partial class MainViewModel : ViewModelBase
         RestartVmByNameCommand = new AsyncRelayCommand<string>(RestartVmByNameAsync, _ => !IsBusy);
         OpenConsoleByNameCommand = new AsyncRelayCommand<string>(OpenConsoleByNameAsync, _ => !IsBusy);
         CreateSnapshotByNameCommand = new AsyncRelayCommand<string>(CreateSnapshotByNameAsync, _ => !IsBusy);
+
+        RefreshUsbDevicesCommand = new AsyncRelayCommand(RefreshUsbDevicesAsync, () => !IsBusy && UsbRuntimeAvailable);
+        BindUsbDeviceCommand = new AsyncRelayCommand(BindSelectedUsbDeviceAsync, CanExecuteBindUsbAction);
+        UnbindUsbDeviceCommand = new AsyncRelayCommand(UnbindSelectedUsbDeviceAsync, CanExecuteUnbindUsbAction);
+        AttachUsbToWslCommand = new AsyncRelayCommand(AttachSelectedUsbToWslAsync, CanExecuteAttachUsbToWslAction);
+        DetachUsbDeviceCommand = new AsyncRelayCommand(DetachSelectedUsbDeviceAsync, CanExecuteDetachUsbAction);
 
         StartDefaultVmCommand = new AsyncRelayCommand(StartDefaultVmAsync, () => !IsBusy);
         StopDefaultVmCommand = new AsyncRelayCommand(StopDefaultVmAsync, () => !IsBusy);
@@ -507,6 +556,11 @@ public partial class MainViewModel : ViewModelBase
         OpenConsoleByNameCommand.NotifyCanExecuteChanged();
         CreateSnapshotByNameCommand.NotifyCanExecuteChanged();
         RenameVmAdapterCommand.NotifyCanExecuteChanged();
+        RefreshUsbDevicesCommand.NotifyCanExecuteChanged();
+        BindUsbDeviceCommand.NotifyCanExecuteChanged();
+        UnbindUsbDeviceCommand.NotifyCanExecuteChanged();
+        AttachUsbToWslCommand.NotifyCanExecuteChanged();
+        DetachUsbDeviceCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(HasBusyProgress));
     }
 
@@ -550,6 +604,10 @@ public partial class MainViewModel : ViewModelBase
         if (value == 0)
         {
             _ = HandleNetworkTabActivatedAsync();
+        }
+        else if (value == 1)
+        {
+            _ = LoadUsbDevicesAsync(showNotification: false);
         }
     }
 
@@ -728,6 +786,63 @@ public partial class MainViewModel : ViewModelBase
         SelectedCheckpoint = value?.Checkpoint;
     }
 
+    partial void OnSelectedUsbDeviceChanged(UsbIpDeviceInfo? value)
+    {
+        BindUsbDeviceCommand.NotifyCanExecuteChanged();
+        UnbindUsbDeviceCommand.NotifyCanExecuteChanged();
+        AttachUsbToWslCommand.NotifyCanExecuteChanged();
+        DetachUsbDeviceCommand.NotifyCanExecuteChanged();
+        _suppressUsbAutoShareToggleHandling = true;
+        try
+        {
+            SelectedUsbDeviceAutoShareEnabled = value is not null && _usbAutoShareDeviceKeys.Contains(BuildUsbAutoShareKey(value));
+        }
+        finally
+        {
+            _suppressUsbAutoShareToggleHandling = false;
+        }
+
+        NotifyTrayStateChanged();
+    }
+
+    partial void OnSelectedUsbDeviceAutoShareEnabledChanged(bool value)
+    {
+        if (_suppressUsbAutoShareToggleHandling || SelectedUsbDevice is null)
+        {
+            return;
+        }
+
+        var key = BuildUsbAutoShareKey(SelectedUsbDevice);
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            AddNotification("Auto-Share konnte für dieses USB-Gerät nicht gespeichert werden (kein stabiler Schlüssel).", "Warning");
+            return;
+        }
+
+        var changed = value
+            ? _usbAutoShareDeviceKeys.Add(key)
+            : _usbAutoShareDeviceKeys.Remove(key);
+
+        if (!changed)
+        {
+            return;
+        }
+
+        PersistUsbAutoShareConfig();
+        AddNotification(value
+                ? $"Auto-Share für USB-Gerät '{SelectedUsbDevice.Description}' aktiviert."
+                : $"Auto-Share für USB-Gerät '{SelectedUsbDevice.Description}' deaktiviert.",
+            "Info");
+
+        if (value
+            && !IsBusy
+            && !SelectedUsbDevice.IsShared
+            && !string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId))
+        {
+            _ = BindSelectedUsbDeviceAsync();
+        }
+    }
+
     partial void OnSelectedVmForConfigChanged(VmDefinition? value)
     {
         RemoveVmCommand.NotifyCanExecuteChanged();
@@ -785,8 +900,54 @@ public partial class MainViewModel : ViewModelBase
 
     private bool CanExecuteVmAction() => !IsBusy && SelectedVm is not null;
 
+    private bool CanExecuteBindUsbAction()
+    {
+         return !IsBusy
+             && UsbRuntimeAvailable
+               && SelectedUsbDevice is not null
+               && !string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId)
+               && !SelectedUsbDevice.IsShared;
+    }
+
+    private bool CanExecuteUnbindUsbAction()
+    {
+         return !IsBusy
+             && UsbRuntimeAvailable
+               && SelectedUsbDevice is not null
+               && !string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId)
+               && SelectedUsbDevice.IsShared;
+    }
+
+    private bool CanExecuteAttachUsbToWslAction()
+    {
+         return !IsBusy
+             && UsbRuntimeAvailable
+               && SelectedUsbDevice is not null
+               && !string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId)
+               && SelectedUsbDevice.IsShared
+               && !SelectedUsbDevice.IsAttached;
+    }
+
+    private bool CanExecuteDetachUsbAction()
+    {
+         return !IsBusy
+             && UsbRuntimeAvailable
+               && SelectedUsbDevice is not null
+               && !string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId)
+               && SelectedUsbDevice.IsAttached;
+    }
+
     private bool CanExecuteStartVmAction() => CanExecuteVmAction() && !IsRunningState(SelectedVmState);
 
+
+    partial void OnUsbRuntimeAvailableChanged(bool value)
+    {
+        RefreshUsbDevicesCommand.NotifyCanExecuteChanged();
+        BindUsbDeviceCommand.NotifyCanExecuteChanged();
+        UnbindUsbDeviceCommand.NotifyCanExecuteChanged();
+        AttachUsbToWslCommand.NotifyCanExecuteChanged();
+        DetachUsbDeviceCommand.NotifyCanExecuteChanged();
+    }
     private bool CanExecuteStopVmAction() => CanExecuteVmAction() && IsRunningState(SelectedVmState);
 
     private bool CanExecuteRestartVmAction() => CanExecuteVmAction() && IsRunningState(SelectedVmState);
@@ -1137,6 +1298,287 @@ public partial class MainViewModel : ViewModelBase
         await LoadVmsFromHyperVWithRetryAsync();
         await RefreshSwitchesAsync();
         await RefreshVmStatusAsync();
+    }
+
+    private async Task RefreshUsbDevicesAsync()
+    {
+        if (!UsbRuntimeAvailable)
+        {
+            UsbStatusText = string.IsNullOrWhiteSpace(UsbRuntimeHintText)
+                ? "USB ist deaktiviert. usbipd-win ist nicht installiert."
+                : UsbRuntimeHintText;
+            AddNotification(UsbStatusText, "Warning");
+            return;
+        }
+
+        await LoadUsbDevicesAsync(showNotification: true);
+    }
+
+    private async Task LoadUsbDevicesAsync(bool showNotification)
+    {
+        var previouslySelectedBusId = SelectedUsbDevice?.BusId;
+        UsbStatusText = "USB-Geräte werden geladen...";
+
+        await ExecuteBusyActionAsync("USB-Geräte werden geladen...", async token =>
+        {
+            IReadOnlyList<UsbIpDeviceInfo> devices;
+            try
+            {
+                devices = await _usbIpService.GetDevicesAsync(token);
+
+                var autoShareCandidates = devices
+                    .Where(device =>
+                        !string.IsNullOrWhiteSpace(device.BusId)
+                        && !device.IsShared
+                        && _usbAutoShareDeviceKeys.Contains(BuildUsbAutoShareKey(device)))
+                    .ToList();
+
+                if (autoShareCandidates.Count > 0)
+                {
+                    var autoShareApplied = 0;
+                    var autoShareFailed = 0;
+
+                    foreach (var candidate in autoShareCandidates)
+                    {
+                        try
+                        {
+                            await _usbIpService.BindAsync(candidate.BusId, force: false, token);
+                            autoShareApplied++;
+                        }
+                        catch (Exception ex)
+                        {
+                            autoShareFailed++;
+                            Log.Warning(ex, "Auto-Share für USB-Gerät {BusId} fehlgeschlagen.", candidate.BusId);
+                        }
+                    }
+
+                    devices = await _usbIpService.GetDevicesAsync(token);
+
+                    if (autoShareApplied > 0)
+                    {
+                        AddNotification($"Auto-Share: {autoShareApplied} USB-Gerät(e) automatisch freigegeben.", "Info");
+                    }
+
+                    if (autoShareFailed > 0)
+                    {
+                        AddNotification($"Auto-Share: {autoShareFailed} USB-Gerät(e) konnten nicht freigegeben werden.", "Warning");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                UsbDevices.Clear();
+                SelectedUsbDevice = null;
+                UsbStatusText = BuildUsbUnavailableStatus(ex.Message);
+
+                if (IsUsbRuntimeMissing(ex.Message))
+                {
+                    UsbRuntimeAvailable = false;
+                    UsbRuntimeHintText = "USB-Funktion deaktiviert: usbipd-win ist nicht installiert. Quelle: https://github.com/dorssel/usbipd-win";
+                }
+
+                NotifyTrayStateChanged();
+
+                if (showNotification)
+                {
+                    AddNotification(UsbStatusText, "Warning");
+                }
+
+                return;
+            }
+
+            UsbDevices.Clear();
+            foreach (var device in devices)
+            {
+                UsbDevices.Add(device);
+            }
+
+            SelectedUsbDevice = UsbDevices.FirstOrDefault(device =>
+                                    !string.IsNullOrWhiteSpace(previouslySelectedBusId)
+                                    && string.Equals(device.BusId, previouslySelectedBusId, StringComparison.OrdinalIgnoreCase))
+                                ?? UsbDevices.FirstOrDefault();
+
+            UsbStatusText = UsbDevices.Count == 0
+                ? "Keine USB-Geräte gefunden."
+                : $"{UsbDevices.Count} USB-Gerät(e) geladen.";
+
+            UsbRuntimeAvailable = true;
+            UsbRuntimeHintText = string.Empty;
+
+            NotifyTrayStateChanged();
+
+            if (showNotification)
+            {
+                AddNotification(UsbStatusText, UsbDevices.Count == 0 ? "Warning" : "Info");
+            }
+        }, showNotificationOnErrorOnly: true);
+    }
+
+    private static string BuildUsbUnavailableStatus(string? details)
+    {
+        if (string.IsNullOrWhiteSpace(details))
+        {
+            return "USB nicht verfügbar (usbipd fehlt oder Dienst läuft nicht).";
+        }
+
+        if (details.Contains("nicht installiert", StringComparison.OrdinalIgnoreCase)
+            || details.Contains("nicht gefunden", StringComparison.OrdinalIgnoreCase)
+            || details.Contains("winget", StringComparison.OrdinalIgnoreCase))
+        {
+            return "USB nicht verfügbar: usbipd-win fehlt. Optional im Setup installieren oder manuell von https://github.com/dorssel/usbipd-win";
+        }
+
+        if (details.Contains("Dienst", StringComparison.OrdinalIgnoreCase)
+            || details.Contains("service", StringComparison.OrdinalIgnoreCase))
+        {
+            return "USB nicht verfügbar: usbipd-Dienst läuft nicht.";
+        }
+
+        return "USB nicht verfügbar. Details im Log/Benachrichtigung prüfen.";
+    }
+
+    private static bool IsUsbRuntimeMissing(string? details)
+    {
+        if (string.IsNullOrWhiteSpace(details))
+        {
+            return false;
+        }
+
+        return details.Contains("nicht installiert", StringComparison.OrdinalIgnoreCase)
+               || details.Contains("nicht gefunden", StringComparison.OrdinalIgnoreCase)
+               || details.Contains("usbipd-win", StringComparison.OrdinalIgnoreCase)
+               || details.Contains("usbipd.exe", StringComparison.OrdinalIgnoreCase)
+               || details.Contains("winget", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildUsbAutoShareKey(UsbIpDeviceInfo device)
+    {
+        if (!string.IsNullOrWhiteSpace(device.InstanceId))
+        {
+            return "instance:" + device.InstanceId.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(device.HardwareId))
+        {
+            return "hardware:" + device.HardwareId.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(device.Description))
+        {
+            return "description:" + device.Description.Trim();
+        }
+
+        return string.Empty;
+    }
+
+    private void PersistUsbAutoShareConfig()
+    {
+        try
+        {
+            var configResult = _configService.LoadOrCreate(_configPath);
+            configResult.Config.Usb.AutoShareDeviceKeys = _usbAutoShareDeviceKeys
+                .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (!_configService.TrySave(_configPath, configResult.Config, out var errorMessage))
+            {
+                AddNotification($"USB Auto-Share-Konfiguration konnte nicht gespeichert werden: {errorMessage}", "Warning");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "USB Auto-Share-Konfiguration konnte nicht gespeichert werden.");
+            AddNotification("USB Auto-Share-Konfiguration konnte nicht gespeichert werden.", "Warning");
+        }
+    }
+
+    private async Task BindSelectedUsbDeviceAsync()
+    {
+        if (SelectedUsbDevice is null || string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId))
+        {
+            return;
+        }
+
+        var busId = SelectedUsbDevice.BusId;
+        if (!IsProcessElevated())
+        {
+            AddNotification("UAC wird angefordert für USB Share...", "Info");
+        }
+
+        await ExecuteBusyActionAsync($"USB-Gerät {busId} wird freigegeben...", async token =>
+        {
+            await _usbIpService.BindAsync(busId, force: false, token);
+            AddNotification($"USB-Gerät '{busId}' wurde freigegeben.", "Success");
+        });
+
+        await LoadUsbDevicesAsync(showNotification: false);
+    }
+
+    private async Task UnbindSelectedUsbDeviceAsync()
+    {
+        if (SelectedUsbDevice is null || string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId))
+        {
+            return;
+        }
+
+        var busId = SelectedUsbDevice.BusId;
+        if (!IsProcessElevated())
+        {
+            AddNotification("UAC wird angefordert für USB Unshare...", "Info");
+        }
+
+        await ExecuteBusyActionAsync($"USB-Freigabe für {busId} wird entfernt...", async token =>
+        {
+            await _usbIpService.UnbindAsync(busId, token);
+            AddNotification($"USB-Freigabe für '{busId}' wurde entfernt.", "Success");
+        });
+
+        await LoadUsbDevicesAsync(showNotification: false);
+    }
+
+    private async Task AttachSelectedUsbToWslAsync()
+    {
+        if (SelectedUsbDevice is null || string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId))
+        {
+            return;
+        }
+
+        var busId = SelectedUsbDevice.BusId;
+        var distribution = string.IsNullOrWhiteSpace(UsbWslDistribution) ? null : UsbWslDistribution.Trim();
+
+        await ExecuteBusyActionAsync($"USB-Gerät {busId} wird an WSL angehängt...", async token =>
+        {
+            await _usbIpService.AttachToWslAsync(busId, distribution, token);
+            AddNotification(
+                distribution is null
+                    ? $"USB-Gerät '{busId}' an WSL angehängt."
+                    : $"USB-Gerät '{busId}' an WSL-Distribution '{distribution}' angehängt.",
+                "Success");
+        });
+
+        await LoadUsbDevicesAsync(showNotification: false);
+    }
+
+    private async Task DetachSelectedUsbDeviceAsync()
+    {
+        if (SelectedUsbDevice is null || string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId))
+        {
+            return;
+        }
+
+        var busId = SelectedUsbDevice.BusId;
+        if (!IsProcessElevated())
+        {
+            AddNotification("UAC wird angefordert für USB Detach...", "Info");
+        }
+
+        await ExecuteBusyActionAsync($"USB-Gerät {busId} wird getrennt...", async token =>
+        {
+            await _usbIpService.DetachAsync(busId, token);
+            AddNotification($"USB-Gerät '{busId}' wurde getrennt.", "Success");
+        });
+
+        await LoadUsbDevicesAsync(showNotification: false);
     }
 
     private async Task EnsureSelectedVmNetworkSelectionAsync(bool showNotificationOnMissingSwitch)
@@ -2015,6 +2457,12 @@ public partial class MainViewModel : ViewModelBase
                     CheckOnStartup = UpdateCheckOnStartup,
                     GitHubOwner = GithubOwner,
                     GitHubRepo = GithubRepo
+                },
+                Usb = new UsbSettings
+                {
+                    AutoShareDeviceKeys = _usbAutoShareDeviceKeys
+                        .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                        .ToList()
                 }
             };
 
@@ -2090,6 +2538,101 @@ public partial class MainViewModel : ViewModelBase
                 SwitchType = vmSwitch.SwitchType
             })
             .ToList();
+    }
+
+    public UsbIpDeviceInfo? GetSelectedUsbDeviceForTray()
+    {
+        if (SelectedUsbDevice is null)
+        {
+            return null;
+        }
+
+        return new UsbIpDeviceInfo
+        {
+            BusId = SelectedUsbDevice.BusId,
+            Description = SelectedUsbDevice.Description,
+            HardwareId = SelectedUsbDevice.HardwareId,
+            InstanceId = SelectedUsbDevice.InstanceId,
+            PersistedGuid = SelectedUsbDevice.PersistedGuid,
+            ClientIpAddress = SelectedUsbDevice.ClientIpAddress
+        };
+    }
+
+    public IReadOnlyList<UsbIpDeviceInfo> GetUsbDevicesForTray()
+    {
+        return UsbDevices
+            .Select(device => new UsbIpDeviceInfo
+            {
+                BusId = device.BusId,
+                Description = device.Description,
+                HardwareId = device.HardwareId,
+                InstanceId = device.InstanceId,
+                PersistedGuid = device.PersistedGuid,
+                ClientIpAddress = device.ClientIpAddress
+            })
+            .ToList();
+    }
+
+    public Task SelectUsbDeviceForTrayAsync(string selectionKey)
+    {
+        if (string.IsNullOrWhiteSpace(selectionKey))
+        {
+            return Task.CompletedTask;
+        }
+
+        var key = selectionKey.Trim();
+
+        var target = UsbDevices.FirstOrDefault(device =>
+            string.Equals(BuildUsbSelectionKey(device), key, StringComparison.OrdinalIgnoreCase));
+
+        if (target is not null)
+        {
+            SelectedUsbDevice = target;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static string BuildUsbSelectionKey(UsbIpDeviceInfo device)
+    {
+        if (!string.IsNullOrWhiteSpace(device.BusId))
+        {
+            return "busid:" + device.BusId.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(device.PersistedGuid))
+        {
+            return "guid:" + device.PersistedGuid.Trim();
+        }
+
+        return "instance:" + (device.InstanceId?.Trim() ?? string.Empty);
+    }
+
+    public async Task RefreshUsbDevicesFromTrayAsync()
+    {
+        await LoadUsbDevicesAsync(showNotification: false);
+    }
+
+    public async Task ShareSelectedUsbFromTrayAsync()
+    {
+        if (SelectedUsbDevice is null || string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId))
+        {
+            AddNotification("Kein USB-Gerät für Share ausgewählt.", "Warning");
+            return;
+        }
+
+        await BindSelectedUsbDeviceAsync();
+    }
+
+    public async Task UnshareSelectedUsbFromTrayAsync()
+    {
+        if (SelectedUsbDevice is null || string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId))
+        {
+            AddNotification("Kein USB-Gerät für Unshare ausgewählt.", "Warning");
+            return;
+        }
+
+        await UnbindSelectedUsbDeviceAsync();
     }
 
     public async Task RefreshTrayDataAsync()
@@ -2170,18 +2713,74 @@ public partial class MainViewModel : ViewModelBase
         });
     }
 
-    public async Task ConnectVmSwitchFromTrayAsync(string vmName, string switchName)
+    public async Task<IReadOnlyList<HyperVVmNetworkAdapterInfo>> GetVmNetworkAdaptersForTrayAsync(string vmName)
+    {
+        if (string.IsNullOrWhiteSpace(vmName))
+        {
+            return [];
+        }
+
+        try
+        {
+            var adapters = await _hyperVService.GetVmNetworkAdaptersAsync(vmName, CancellationToken.None);
+            return adapters
+                .Select(adapter => new HyperVVmNetworkAdapterInfo
+                {
+                    Name = adapter.Name,
+                    SwitchName = adapter.SwitchName,
+                    MacAddress = adapter.MacAddress
+                })
+                .OrderBy(adapter => adapter.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Konnte Netzwerkadapter für Tray-Control-Center nicht laden: {VmName}", vmName);
+            return [];
+        }
+    }
+
+    public Task ConnectVmSwitchFromTrayAsync(string vmName, string switchName)
+    {
+        return ConnectVmSwitchFromTrayAsync(vmName, switchName, null);
+    }
+
+    public async Task ConnectVmSwitchFromTrayAsync(string vmName, string switchName, string? adapterName)
     {
         await ExecuteBusyActionAsync($"'{vmName}' wird mit '{switchName}' verbunden...", async token =>
         {
             string? trayAdapterName = null;
             var vmConfig = AvailableVms.FirstOrDefault(vm => string.Equals(vm.Name, vmName, StringComparison.OrdinalIgnoreCase));
             var configuredAdapterName = vmConfig?.TrayAdapterName?.Trim();
+            var requestedAdapterName = adapterName?.Trim();
 
-            if (!string.IsNullOrWhiteSpace(configuredAdapterName))
+            IReadOnlyList<HyperVVmNetworkAdapterInfo>? adapters = null;
+
+            if (!string.IsNullOrWhiteSpace(requestedAdapterName)
+                || !string.IsNullOrWhiteSpace(configuredAdapterName))
             {
-                var adapters = await _hyperVService.GetVmNetworkAdaptersAsync(vmName, token);
-                var exists = adapters.Any(adapter => string.Equals(adapter.Name, configuredAdapterName, StringComparison.OrdinalIgnoreCase));
+                adapters = await _hyperVService.GetVmNetworkAdaptersAsync(vmName, token);
+            }
+
+            if (!string.IsNullOrWhiteSpace(requestedAdapterName))
+            {
+                var requestedExists = adapters?.Any(adapter =>
+                    string.Equals(adapter.Name, requestedAdapterName, StringComparison.OrdinalIgnoreCase)) == true;
+
+                if (requestedExists)
+                {
+                    trayAdapterName = requestedAdapterName;
+                }
+                else
+                {
+                    AddNotification($"Gewählter Adapter '{requestedAdapterName}' für '{vmName}' wurde nicht gefunden. Fallback auf Standard-Verhalten.", "Warning");
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(trayAdapterName)
+                && !string.IsNullOrWhiteSpace(configuredAdapterName))
+            {
+                var exists = adapters?.Any(adapter => string.Equals(adapter.Name, configuredAdapterName, StringComparison.OrdinalIgnoreCase)) == true;
 
                 if (exists)
                 {
@@ -2337,6 +2936,25 @@ public partial class MainViewModel : ViewModelBase
                 UpdateCheckOnStartup = config.Update.CheckOnStartup;
                 GithubOwner = config.Update.GitHubOwner;
                 GithubRepo = config.Update.GitHubRepo;
+                _usbAutoShareDeviceKeys.Clear();
+                foreach (var key in config.Usb.AutoShareDeviceKeys)
+                {
+                    if (!string.IsNullOrWhiteSpace(key))
+                    {
+                        _usbAutoShareDeviceKeys.Add(key.Trim());
+                    }
+                }
+
+                _suppressUsbAutoShareToggleHandling = true;
+                try
+                {
+                    SelectedUsbDeviceAutoShareEnabled = SelectedUsbDevice is not null
+                        && _usbAutoShareDeviceKeys.Contains(BuildUsbAutoShareKey(SelectedUsbDevice));
+                }
+                finally
+                {
+                    _suppressUsbAutoShareToggleHandling = false;
+                }
             }
             finally
             {
@@ -2397,6 +3015,75 @@ public partial class MainViewModel : ViewModelBase
             .Select(name => name.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    public async Task UnshareAllSharedUsbOnShutdownAsync()
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        try
+        {
+            using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var devices = await _usbIpService.GetDevicesAsync(shutdownCts.Token);
+            var sharedDevices = devices.Where(device => device.IsShared).ToList();
+
+            if (sharedDevices.Count == 0)
+            {
+                return;
+            }
+
+            var released = 0;
+            var failed = 0;
+
+            foreach (var device in sharedDevices)
+            {
+                try
+                {
+                    if (device.IsAttached && !string.IsNullOrWhiteSpace(device.BusId))
+                    {
+                        await _usbIpService.DetachAsync(device.BusId, shutdownCts.Token);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(device.BusId))
+                    {
+                        await _usbIpService.UnbindAsync(device.BusId, shutdownCts.Token);
+                    }
+                    else if (!string.IsNullOrWhiteSpace(device.PersistedGuid))
+                    {
+                        await _usbIpService.UnbindByPersistedGuidAsync(device.PersistedGuid, shutdownCts.Token);
+                    }
+                    else
+                    {
+                        failed++;
+                        continue;
+                    }
+
+                    released++;
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    Log.Warning(ex, "Freigeben von USB-Gerät beim Shutdown fehlgeschlagen (BusId={BusId}, Guid={Guid}).", device.BusId, device.PersistedGuid);
+                }
+            }
+
+            if (released > 0)
+            {
+                AddNotification($"Beim Beenden wurden {released} USB-Freigabe(n) entfernt.", "Info");
+            }
+
+            if (failed > 0)
+            {
+                AddNotification($"Beim Beenden konnten {failed} USB-Freigabe(n) nicht entfernt werden.", "Warning");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "USB-Freigaben konnten beim Beenden nicht vollständig entfernt werden.");
+        }
     }
 
     private static string NormalizeVmConnectComputerName(string? computerName)
@@ -2621,7 +3308,8 @@ public partial class MainViewModel : ViewModelBase
                 GithubOwner,
                 GithubRepo,
                 AppVersion,
-                token);
+                token,
+                "HyperTool-Setup");
 
             UpdateStatus = result.Message;
             ReleaseUrl = result.ReleaseUrl ?? string.Empty;
@@ -2848,6 +3536,20 @@ public partial class MainViewModel : ViewModelBase
         }
 
         return $"{value:0.##} {units[unitIndex]}";
+    }
+
+    private static bool IsProcessElevated()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var principal = new WindowsPrincipal(identity);
+            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task ExecuteBusyActionAsync(string busyText, Func<CancellationToken, Task> action, bool showNotificationOnErrorOnly = false)

@@ -20,7 +20,8 @@ public sealed class GitHubUpdateService : IUpdateService
         string owner,
         string repo,
         string currentVersion,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? installerAssetHint = null)
     {
         if (string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(repo))
         {
@@ -48,7 +49,7 @@ public sealed class GitHubUpdateService : IUpdateService
                     ? urlElement.GetString()
                     : releasePageUrl;
 
-                var installerAsset = TryFindInstallerAsset(doc.RootElement);
+                var installerAsset = TryFindInstallerAsset(doc.RootElement, installerAssetHint);
 
                 if (string.IsNullOrWhiteSpace(latestTag))
                 {
@@ -100,7 +101,7 @@ public sealed class GitHubUpdateService : IUpdateService
         }
     }
 
-    private static (string Name, string DownloadUrl)? TryFindInstallerAsset(JsonElement releaseRoot)
+    private static (string Name, string DownloadUrl)? TryFindInstallerAsset(JsonElement releaseRoot, string? installerAssetHint)
     {
         if (!releaseRoot.TryGetProperty("assets", out var assetsElement) || assetsElement.ValueKind != JsonValueKind.Array)
         {
@@ -150,6 +151,12 @@ public sealed class GitHubUpdateService : IUpdateService
             if (lowerName.EndsWith(".msi", StringComparison.OrdinalIgnoreCase))
             {
                 score += 1;
+            }
+
+            if (!string.IsNullOrWhiteSpace(installerAssetHint)
+                && lowerName.Contains(installerAssetHint.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase))
+            {
+                score += 8;
             }
 
             candidates.Add((name, downloadUrl, score));
