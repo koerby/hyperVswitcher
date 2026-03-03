@@ -1160,6 +1160,60 @@ public sealed partial class App : Application
         }
         catch (Exception ex)
         {
+            if (ShouldRetryUsbAttach(ex))
+            {
+                try
+                {
+                    GuestLogger.Warn("usb.connect.retry", "USB Attach wird nach Recovery erneut versucht.", new
+                    {
+                        operationId,
+                        busId,
+                        elapsedMs = stopwatch.ElapsedMilliseconds,
+                        hostAddress = hostResolution.ResolvedIpv4,
+                        hostSource = hostResolution.Source,
+                        reason = ex.Message,
+                        transportPath = string.Equals(hostResolution.Source, "hyperv-socket", StringComparison.OrdinalIgnoreCase)
+                            ? "hyperv"
+                            : "ip-fallback"
+                    });
+
+                    await TryRecoverAndRetryUsbAttachAsync(busId, hostResolution.ResolvedIpv4, CancellationToken.None);
+                    _selectedUsbBusId = busId;
+                    ApplyUsbTransportResolution(hostResolution);
+
+                    GuestLogger.Info("usb.connect.success", "USB Host-Attach erfolgreich (Retry).", new
+                    {
+                        operationId,
+                        busId,
+                        elapsedMs = stopwatch.ElapsedMilliseconds,
+                        hostAddress = hostResolution.ResolvedIpv4,
+                        hostSource = hostResolution.Source,
+                        transportPath = string.Equals(hostResolution.Source, "hyperv-socket", StringComparison.OrdinalIgnoreCase)
+                            ? "hyperv"
+                            : "ip-fallback",
+                        recovery = "retry-after-detach"
+                    });
+
+                    await TrySendUsbConnectionEventAckAsync(busId, "usb-connected", CancellationToken.None);
+                    return 0;
+                }
+                catch (Exception retryEx)
+                {
+                    GuestLogger.Warn("usb.connect.retry.failed", retryEx.Message, new
+                    {
+                        operationId,
+                        busId,
+                        elapsedMs = stopwatch.ElapsedMilliseconds,
+                        hostAddress = hostResolution.ResolvedIpv4,
+                        hostSource = hostResolution.Source,
+                        transportPath = string.Equals(hostResolution.Source, "hyperv-socket", StringComparison.OrdinalIgnoreCase)
+                            ? "hyperv"
+                            : "ip-fallback",
+                        exceptionType = retryEx.GetType().FullName
+                    });
+                }
+            }
+
             if (string.Equals(hostResolution.Source, "hyperv-socket", StringComparison.OrdinalIgnoreCase))
             {
                 var ipFallbackResolution = ResolveUsbHostAddressDiagnostics(preferHyperVSocket: false);
@@ -1216,6 +1270,30 @@ public sealed partial class App : Application
             });
             return 1;
         }
+    }
+
+    private async Task TryRecoverAndRetryUsbAttachAsync(string busId, string hostAddress, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _usbService.DetachFromHostAsync(busId, hostAddress, cancellationToken);
+        }
+        catch
+        {
+        }
+
+        await Task.Delay(TimeSpan.FromMilliseconds(850), cancellationToken);
+        await _usbService.AttachToHostAsync(busId, hostAddress, cancellationToken);
+    }
+
+    private static bool ShouldRetryUsbAttach(Exception exception)
+    {
+        var message = exception.Message ?? string.Empty;
+        return message.Contains("device in error state", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("error state", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("resource busy", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("temporarily unavailable", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("already in use", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<string?> DiscoverUsbHostAddressAsync()

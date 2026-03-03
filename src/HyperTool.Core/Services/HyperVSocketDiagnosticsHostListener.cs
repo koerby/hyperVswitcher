@@ -107,9 +107,11 @@ public sealed class HyperVSocketDiagnosticsHostListener : IDisposable
 
     private static HyperVSocketDiagnosticsAck ParseAckPayload(string payload)
     {
+        var normalizedPayload = payload.TrimStart('\uFEFF', ' ', '\t', '\r', '\n');
+
         try
         {
-            var parsed = JsonSerializer.Deserialize<HyperVSocketDiagnosticsAck>(payload, AckJsonOptions);
+            var parsed = JsonSerializer.Deserialize<HyperVSocketDiagnosticsAck>(normalizedPayload, AckJsonOptions);
             if (parsed is not null && !string.IsNullOrWhiteSpace(parsed.GuestComputerName))
             {
                 return parsed;
@@ -119,13 +121,87 @@ public sealed class HyperVSocketDiagnosticsHostListener : IDisposable
         {
         }
 
+        try
+        {
+            using var doc = JsonDocument.Parse(normalizedPayload);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                var root = doc.RootElement;
+                var guestComputerName = GetJsonString(root, "guestComputerName");
+                if (!string.IsNullOrWhiteSpace(guestComputerName))
+                {
+                    return new HyperVSocketDiagnosticsAck
+                    {
+                        GuestComputerName = guestComputerName,
+                        HyperVSocketActive = GetJsonBool(root, "hyperVSocketActive"),
+                        RegistryServiceOk = GetJsonBool(root, "registryServiceOk"),
+                        BusId = GetJsonString(root, "busId"),
+                        EventType = GetJsonString(root, "eventType"),
+                        SentAtUtc = GetJsonString(root, "sentAtUtc")
+                    };
+                }
+            }
+        }
+        catch
+        {
+        }
+
         return new HyperVSocketDiagnosticsAck
         {
-            GuestComputerName = payload,
+            GuestComputerName = normalizedPayload,
             HyperVSocketActive = null,
             RegistryServiceOk = null,
             SentAtUtc = null
         };
+    }
+
+    private static string? GetJsonString(JsonElement root, string propertyName)
+    {
+        foreach (var property in root.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return property.Value.ValueKind switch
+            {
+                JsonValueKind.String => property.Value.GetString(),
+                JsonValueKind.Null => null,
+                _ => property.Value.ToString()
+            };
+        }
+
+        return null;
+    }
+
+    private static bool? GetJsonBool(JsonElement root, string propertyName)
+    {
+        foreach (var property in root.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (property.Value.ValueKind == JsonValueKind.True)
+            {
+                return true;
+            }
+
+            if (property.Value.ValueKind == JsonValueKind.False)
+            {
+                return false;
+            }
+
+            if (property.Value.ValueKind == JsonValueKind.String
+                && bool.TryParse(property.Value.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return null;
     }
 
     private void TryRegisterServiceGuid()
