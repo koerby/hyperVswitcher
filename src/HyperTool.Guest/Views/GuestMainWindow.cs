@@ -32,8 +32,8 @@ internal sealed class GuestMainWindow : Window
         Error
     }
 
-    public const int DefaultWindowWidth = 1400;
-    public const int DefaultWindowHeight = 860;
+    public const int DefaultWindowWidth = 1052;
+    public const int DefaultWindowHeight = 865;
     private const string ToolRestartIcon = "↻";
     private const string ToolRestartLabel = "Tool neu starten";
     private const int GuestSplashMinVisibleMs = 900;
@@ -75,7 +75,13 @@ internal sealed class GuestMainWindow : Window
     private readonly Border _notificationSummaryBorder = new();
     private readonly Grid _notificationExpandedGrid = new() { Visibility = Visibility.Collapsed };
     private readonly ListView _notificationsListView = new();
-    private readonly TextBlock _statusText = new() { Text = "Bereit.", TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _statusText = new()
+    {
+        Text = "Bereit.",
+        TextWrapping = TextWrapping.NoWrap,
+        TextTrimming = TextTrimming.CharacterEllipsis,
+        MaxLines = 1
+    };
     private readonly TextBlock _updateStatusValueText = new() { Text = "Noch nicht geprüft", TextWrapping = TextWrapping.Wrap, Opacity = 0.9 };
     private Button? _installUpdateButton;
     private readonly Ellipse _usbRuntimeStatusDot = new() { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center };

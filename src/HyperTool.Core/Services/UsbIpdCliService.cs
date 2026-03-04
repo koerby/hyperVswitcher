@@ -1,7 +1,9 @@
 using HyperTool.Models;
 using Microsoft.Win32;
+using Serilog;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
@@ -9,7 +11,7 @@ using System.Text.RegularExpressions;
 
 namespace HyperTool.Services;
 
-public sealed class UsbIpdCliService : IUsbIpService
+public sealed class UsbIpdCliService : IUsbIpService, IDisposable
 {
     private static readonly Regex HardwareIdRegex = new("VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})", RegexOptions.Compiled);
     private static readonly Regex ServiceStateRegex = new(@"STATE\s*:\s*(\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -22,7 +24,20 @@ public sealed class UsbIpdCliService : IUsbIpService
     private const string RemoteFxUsbPolicyValuePrefix = "fEnableUsb";
     private const string WslUsbipFallbackPath = "/mnt/c/Program Files/usbipd-win/WSL/usbip";
     private const string NativeUsbipFallbackPath = @"C:\Program Files\USBip\usbip.exe";
+    private const string ElevatedWorkerArgument = "--usbipd-elevated-worker";
+    private const string ElevatedWorkerPipeArgument = "--pipe";
+    private const string ElevatedWorkerTokenArgument = "--token";
+    private const int ElevatedWorkerConnectTimeoutMs = 120000;
+    private const int ElevatedWorkerConnectProbeMs = 500;
+    private const int ElevatedWorkerShutdownWaitMs = 1500;
     private static readonly SemaphoreSlim EnsureReadyGate = new(1, 1);
+    private readonly SemaphoreSlim _elevatedSessionGate = new(1, 1);
+    private NamedPipeServerStream? _elevatedSessionPipe;
+    private StreamReader? _elevatedSessionReader;
+    private StreamWriter? _elevatedSessionWriter;
+    private Process? _elevatedSessionProcess;
+    private string _elevatedSessionToken = string.Empty;
+    private bool _elevatedSessionUnavailable;
 
     public async Task<bool> IsUsbClientAvailableAsync(CancellationToken cancellationToken)
     {
@@ -270,6 +285,324 @@ public sealed class UsbIpdCliService : IUsbIpService
 
         var result = await RunCommandAsync(["detach", "--busid", busId], cancellationToken);
         EnsureSuccess(result, $"USB-Gerät mit BUSID '{busId}' konnte nicht getrennt werden.");
+    }
+
+    public async Task ShutdownElevatedSessionAsync(CancellationToken cancellationToken)
+    {
+        await _elevatedSessionGate.WaitAsync(cancellationToken);
+        try
+        {
+            await ShutdownElevatedSessionUnsafeAsync();
+        }
+        finally
+        {
+            _elevatedSessionGate.Release();
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            ShutdownElevatedSessionAsync(CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch
+        {
+        }
+
+        _elevatedSessionGate.Dispose();
+    }
+
+    private async Task<CommandResult> RunCommandViaElevatedSessionAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        if (_elevatedSessionUnavailable)
+        {
+            var fallbackExitCode = await RunCommandElevatedAsync(args, cancellationToken);
+            return new CommandResult(fallbackExitCode, string.Empty, string.Empty);
+        }
+
+        try
+        {
+            await EnsureElevatedSessionConnectedAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _elevatedSessionUnavailable = true;
+            Log.Warning(ex, "Persistent elevated USB session could not be established. Falling back to direct elevated command mode for this app session.");
+            var exitCode = await RunCommandElevatedAsync(args, cancellationToken);
+            return new CommandResult(exitCode, string.Empty, string.Empty);
+        }
+
+        var request = new ElevatedWorkerRequest
+        {
+            Token = _elevatedSessionToken,
+            Command = "usbipd",
+            Arguments = args.ToArray()
+        };
+
+        var serializedRequest = JsonSerializer.Serialize(request);
+
+        try
+        {
+            await _elevatedSessionWriter!.WriteLineAsync(serializedRequest);
+            var responseLine = await _elevatedSessionReader!.ReadLineAsync().WaitAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(responseLine))
+            {
+                await ShutdownElevatedSessionAsync(CancellationToken.None);
+                throw new InvalidOperationException("Elevated USB-Sitzung wurde unerwartet beendet.");
+            }
+
+            var response = JsonSerializer.Deserialize<ElevatedWorkerResponse>(responseLine);
+            if (response is null)
+            {
+                await ShutdownElevatedSessionAsync(CancellationToken.None);
+                throw new InvalidOperationException("Antwort der Elevated USB-Sitzung konnte nicht gelesen werden.");
+            }
+
+            if (!response.ContinueRunning)
+            {
+                await ShutdownElevatedSessionAsync(CancellationToken.None);
+            }
+
+            return new CommandResult(response.ExitCode, response.StandardOutput ?? string.Empty, response.StandardError ?? string.Empty);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await ShutdownElevatedSessionAsync(CancellationToken.None);
+            throw new InvalidOperationException("Ausführung über Elevated USB-Sitzung fehlgeschlagen.", ex);
+        }
+    }
+
+    private async Task EnsureElevatedSessionConnectedAsync(CancellationToken cancellationToken)
+    {
+        await _elevatedSessionGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_elevatedSessionPipe is { IsConnected: true } && _elevatedSessionReader is not null && _elevatedSessionWriter is not null)
+            {
+                return;
+            }
+
+            await ShutdownElevatedSessionUnsafeAsync();
+
+            var processPath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(processPath))
+            {
+                processPath = Process.GetCurrentProcess().MainModule?.FileName;
+            }
+
+            if (string.IsNullOrWhiteSpace(processPath))
+            {
+                throw new InvalidOperationException("HyperTool executable path konnte nicht ermittelt werden.");
+            }
+
+            var pipeName = $"HyperTool.UsbIpd.Elevated.{Environment.ProcessId}.{Guid.NewGuid():N}";
+            var token = Guid.NewGuid().ToString("N");
+            var server = CreateElevatedSessionServerPipe(pipeName);
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = processPath,
+                UseShellExecute = true,
+                Verb = "runas",
+                WorkingDirectory = AppContext.BaseDirectory,
+                Arguments = BuildArguments([
+                    ElevatedWorkerArgument,
+                    ElevatedWorkerPipeArgument,
+                    pipeName,
+                    ElevatedWorkerTokenArgument,
+                    token
+                ])
+            };
+
+            Process process;
+            try
+            {
+                process = Process.Start(startInfo)
+                          ?? throw new InvalidOperationException("Elevated USB-Worker konnte nicht gestartet werden.");
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+            {
+                throw new InvalidOperationException("UAC-Bestätigung abgebrochen. Aktion wurde nicht ausgeführt.", ex);
+            }
+            catch (Win32Exception ex)
+            {
+                throw new InvalidOperationException(
+                    "HyperTool Elevated Worker konnte nicht gestartet werden.", ex);
+            }
+
+            try
+            {
+                var connectDeadlineUtc = DateTime.UtcNow.AddMilliseconds(ElevatedWorkerConnectTimeoutMs);
+                var connectTask = server.WaitForConnectionAsync(cancellationToken);
+                while (!connectTask.IsCompleted)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    if (process.HasExited)
+                    {
+                        throw new InvalidOperationException($"Elevated USB-Worker wurde beendet (ExitCode={process.ExitCode}).");
+                    }
+
+                    if (DateTime.UtcNow >= connectDeadlineUtc)
+                    {
+                        throw new TimeoutException("The operation has timed out.");
+                    }
+
+                    _ = await Task.WhenAny(connectTask, Task.Delay(ElevatedWorkerConnectProbeMs, cancellationToken));
+                }
+
+                await connectTask;
+
+                var reader = new StreamReader(server, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 4096, leaveOpen: true);
+                var writer = new StreamWriter(server, Encoding.UTF8, bufferSize: 4096, leaveOpen: true)
+                {
+                    AutoFlush = true
+                };
+
+                var ready = await reader.ReadLineAsync().WaitAsync(cancellationToken);
+                if (!string.Equals(ready, "READY", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Elevated USB-Worker hat nicht korrekt initialisiert.");
+                }
+
+                _elevatedSessionPipe = server;
+                _elevatedSessionReader = reader;
+                _elevatedSessionWriter = writer;
+                _elevatedSessionProcess = process;
+                _elevatedSessionToken = token;
+                _elevatedSessionUnavailable = false;
+            }
+            catch
+            {
+                server.Dispose();
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(true);
+                    }
+                }
+                catch
+                {
+                }
+
+                process.Dispose();
+                throw;
+            }
+        }
+        finally
+        {
+            _elevatedSessionGate.Release();
+        }
+    }
+
+    private static NamedPipeServerStream CreateElevatedSessionServerPipe(string pipeName)
+    {
+        try
+        {
+            return new NamedPipeServerStream(
+                pipeName,
+                PipeDirection.InOut,
+                1,
+                PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        }
+        catch
+        {
+            return new NamedPipeServerStream(
+                pipeName,
+                PipeDirection.InOut,
+                1,
+                PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous);
+        }
+    }
+
+    private async Task ShutdownElevatedSessionUnsafeAsync()
+    {
+        if (_elevatedSessionWriter is not null && _elevatedSessionReader is not null && _elevatedSessionPipe is { IsConnected: true })
+        {
+            try
+            {
+                var shutdownRequest = new ElevatedWorkerRequest
+                {
+                    Token = _elevatedSessionToken,
+                    Command = "shutdown",
+                    Arguments = []
+                };
+
+                await _elevatedSessionWriter.WriteLineAsync(JsonSerializer.Serialize(shutdownRequest));
+                _ = await _elevatedSessionReader.ReadLineAsync().WaitAsync(TimeSpan.FromMilliseconds(600));
+            }
+            catch
+            {
+            }
+        }
+
+        try
+        {
+            _elevatedSessionWriter?.Dispose();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _elevatedSessionReader?.Dispose();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _elevatedSessionPipe?.Dispose();
+        }
+        catch
+        {
+        }
+
+        _elevatedSessionWriter = null;
+        _elevatedSessionReader = null;
+        _elevatedSessionPipe = null;
+        _elevatedSessionToken = string.Empty;
+
+        var process = _elevatedSessionProcess;
+        _elevatedSessionProcess = null;
+
+        if (process is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!process.HasExited)
+            {
+                var exited = process.WaitForExit(ElevatedWorkerShutdownWaitMs);
+                if (!exited)
+                {
+                    process.Kill(true);
+                }
+            }
+        }
+        catch
+        {
+        }
+        finally
+        {
+            process.Dispose();
+        }
     }
 
     private static IReadOnlyList<UsbIpDeviceInfo> ParseState(string json)
@@ -1041,4 +1374,24 @@ public sealed class UsbIpdCliService : IUsbIpService
     }
 
     private readonly record struct CommandResult(int ExitCode, string StandardOutput, string StandardError);
+
+    private sealed class ElevatedWorkerRequest
+    {
+        public string Token { get; init; } = string.Empty;
+
+        public string Command { get; init; } = string.Empty;
+
+        public string[] Arguments { get; init; } = [];
+    }
+
+    private sealed class ElevatedWorkerResponse
+    {
+        public int ExitCode { get; init; }
+
+        public string? StandardOutput { get; init; }
+
+        public string? StandardError { get; init; }
+
+        public bool ContinueRunning { get; init; } = true;
+    }
 }

@@ -715,6 +715,17 @@ public partial class MainViewModel : ViewModelBase
                 Log.Warning(ex, "USB-Freigaben konnten beim Deaktivieren nicht vollständig entfernt werden.");
                 AddNotification("USB-Freigaben konnten nicht vollständig entfernt werden (usbipd ggf. nicht verfügbar).", "Warning");
             }
+            finally
+            {
+                try
+                {
+                    await _usbIpService.ShutdownElevatedSessionAsync(CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    Log.Debug(ex, "Elevated USB session could not be closed after disabling host USB sharing.");
+                }
+            }
         }
 
         HostUsbSharingEnabled = enabled;
@@ -3410,6 +3421,15 @@ public partial class MainViewModel : ViewModelBase
     {
         if (IsBusy)
         {
+            try
+            {
+                await _usbIpService.ShutdownElevatedSessionAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "Elevated USB session could not be closed during shutdown while busy.");
+            }
+
             return;
         }
 
@@ -3424,6 +3444,17 @@ public partial class MainViewModel : ViewModelBase
         catch (Exception ex)
         {
             Log.Warning(ex, "USB-Freigaben konnten beim Beenden nicht vollständig entfernt werden.");
+        }
+        finally
+        {
+            try
+            {
+                await _usbIpService.ShutdownElevatedSessionAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "Elevated USB session could not be closed during shutdown cleanup.");
+            }
         }
     }
 

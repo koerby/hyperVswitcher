@@ -116,17 +116,50 @@ public sealed partial class App : Application
     {
         EnsureControlResources();
 
-        if (args.Arguments?.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        var rawLaunchArgs = args.Arguments;
+        if (string.IsNullOrWhiteSpace(rawLaunchArgs))
+        {
+            try
+            {
+                var commandLineArgs = Environment.GetCommandLineArgs();
+                if (commandLineArgs.Length > 1)
+                {
+                    rawLaunchArgs = string.Join(' ', commandLineArgs.Skip(1));
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        if (rawLaunchArgs?.Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Any(arg => string.Equals(arg, "--restart-hns", StringComparison.OrdinalIgnoreCase)) == true)
         {
             RunRestartHnsHelperMode();
             return;
         }
 
-        if (args.Arguments?.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        if (rawLaunchArgs?.Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Any(arg => string.Equals(arg, "--register-sharedfolder-socket", StringComparison.OrdinalIgnoreCase)) == true)
         {
             RunRegisterSharedFolderSocketHelperMode();
+            return;
+        }
+
+        if (rawLaunchArgs?.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Any(arg => string.Equals(arg, "--usbipd-elevated-worker", StringComparison.OrdinalIgnoreCase)) == true)
+        {
+            if (TryGetLaunchArgumentValue(rawLaunchArgs, "--pipe", out var pipeName)
+                && TryGetLaunchArgumentValue(rawLaunchArgs, "--token", out var token))
+            {
+                RunUsbipdElevatedWorkerMode(pipeName, token);
+            }
+            else
+            {
+                Environment.ExitCode = 2;
+                Microsoft.UI.Xaml.Application.Current.Exit();
+            }
+
             return;
         }
 
@@ -1551,6 +1584,221 @@ public sealed partial class App : Application
 
         Environment.ExitCode = success ? 0 : 1;
         Microsoft.UI.Xaml.Application.Current.Exit();
+    }
+
+    private void RunUsbipdElevatedWorkerMode(string pipeName, string token)
+    {
+        try
+        {
+            InitializeLogging();
+        }
+        catch
+        {
+        }
+
+        var exitCode = ExecuteUsbipdElevatedWorker(pipeName, token);
+        Environment.ExitCode = exitCode;
+        Microsoft.UI.Xaml.Application.Current.Exit();
+    }
+
+    private static int ExecuteUsbipdElevatedWorker(string pipeName, string token)
+    {
+        if (string.IsNullOrWhiteSpace(pipeName) || string.IsNullOrWhiteSpace(token))
+        {
+            return 2;
+        }
+
+        try
+        {
+            using var pipe = new NamedPipeClientStream(
+                ".",
+                pipeName,
+                PipeDirection.InOut,
+                PipeOptions.Asynchronous);
+
+            pipe.Connect(120000);
+
+            using var reader = new StreamReader(pipe, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 4096, leaveOpen: true);
+            using var writer = new StreamWriter(pipe, Encoding.UTF8, bufferSize: 4096, leaveOpen: true)
+            {
+                AutoFlush = true
+            };
+
+            writer.WriteLine("READY");
+
+            while (true)
+            {
+                var requestLine = reader.ReadLine();
+                if (requestLine is null)
+                {
+                    break;
+                }
+
+                UsbElevatedWorkerRequest? request;
+                try
+                {
+                    request = JsonSerializer.Deserialize<UsbElevatedWorkerRequest>(requestLine);
+                }
+                catch
+                {
+                    var invalidJson = new UsbElevatedWorkerResponse
+                    {
+                        ExitCode = 1,
+                        StandardOutput = string.Empty,
+                        StandardError = "Ungültiges Request-Format.",
+                        ContinueRunning = true
+                    };
+                    writer.WriteLine(JsonSerializer.Serialize(invalidJson));
+                    continue;
+                }
+
+                if (request is null || !string.Equals(request.Token, token, StringComparison.Ordinal))
+                {
+                    var unauthorized = new UsbElevatedWorkerResponse
+                    {
+                        ExitCode = 5,
+                        StandardOutput = string.Empty,
+                        StandardError = "Unauthorized.",
+                        ContinueRunning = false
+                    };
+                    writer.WriteLine(JsonSerializer.Serialize(unauthorized));
+                    return 5;
+                }
+
+                if (string.Equals(request.Command, "shutdown", StringComparison.OrdinalIgnoreCase))
+                {
+                    var shutdown = new UsbElevatedWorkerResponse
+                    {
+                        ExitCode = 0,
+                        StandardOutput = string.Empty,
+                        StandardError = string.Empty,
+                        ContinueRunning = false
+                    };
+                    writer.WriteLine(JsonSerializer.Serialize(shutdown));
+                    return 0;
+                }
+
+                var commandResult = ExecuteUsbipdWorkerCommand(request.Command, request.Arguments);
+                writer.WriteLine(JsonSerializer.Serialize(commandResult));
+
+                if (!commandResult.ContinueRunning)
+                {
+                    return commandResult.ExitCode;
+                }
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                Log.Error(ex, "USB elevated worker failed.");
+            }
+            catch
+            {
+            }
+
+            return 1;
+        }
+    }
+
+    private static UsbElevatedWorkerResponse ExecuteUsbipdWorkerCommand(string? command, IReadOnlyList<string>? arguments)
+    {
+        if (!string.Equals(command, "usbipd", StringComparison.OrdinalIgnoreCase))
+        {
+            return new UsbElevatedWorkerResponse
+            {
+                ExitCode = 1,
+                StandardOutput = string.Empty,
+                StandardError = "Unbekannter Befehl.",
+                ContinueRunning = true
+            };
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = ResolveUsbipdExecutablePath(),
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+            CreateNoWindow = true
+        };
+
+        if (arguments is not null)
+        {
+            foreach (var argument in arguments)
+            {
+                if (string.IsNullOrWhiteSpace(argument))
+                {
+                    continue;
+                }
+
+                startInfo.ArgumentList.Add(argument);
+            }
+        }
+
+        try
+        {
+            using var process = Process.Start(startInfo)
+                                ?? throw new InvalidOperationException("usbipd konnte nicht gestartet werden.");
+
+            var stdout = process.StandardOutput.ReadToEnd();
+            var stderr = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            return new UsbElevatedWorkerResponse
+            {
+                ExitCode = process.ExitCode,
+                StandardOutput = stdout,
+                StandardError = stderr,
+                ContinueRunning = true
+            };
+        }
+        catch (Exception ex)
+        {
+            return new UsbElevatedWorkerResponse
+            {
+                ExitCode = 1,
+                StandardOutput = string.Empty,
+                StandardError = ex.Message,
+                ContinueRunning = true
+            };
+        }
+    }
+
+    private static string ResolveUsbipdExecutablePath()
+    {
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var candidate = Path.Combine(programFiles, "usbipd-win", "usbipd.exe");
+        if (File.Exists(candidate))
+        {
+            return candidate;
+        }
+
+        return "usbipd";
+    }
+
+    private sealed class UsbElevatedWorkerRequest
+    {
+        public string Token { get; init; } = string.Empty;
+
+        public string Command { get; init; } = string.Empty;
+
+        public IReadOnlyList<string> Arguments { get; init; } = [];
+    }
+
+    private sealed class UsbElevatedWorkerResponse
+    {
+        public int ExitCode { get; init; }
+
+        public string StandardOutput { get; init; } = string.Empty;
+
+        public string StandardError { get; init; } = string.Empty;
+
+        public bool ContinueRunning { get; init; } = true;
     }
 
     private static bool TryGetLaunchArgumentValue(string? rawArguments, string key, out string value)

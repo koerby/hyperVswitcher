@@ -21,4 +21,6 @@ public interface IUsbIpService
     Task UnbindByPersistedGuidAsync(string persistedGuid, CancellationToken cancellationToken);
 
     Task DetachAsync(string busId, CancellationToken cancellationToken);
+
+    Task ShutdownElevatedSessionAsync(CancellationToken cancellationToken);
 }
