@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" />
+    <PackageReference Include="winfsp.net" Version="2.1.25156" />
   </ItemGroup>
 
   <ItemGroup>

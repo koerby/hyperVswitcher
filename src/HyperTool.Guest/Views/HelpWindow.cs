@@ -57,20 +57,20 @@ public sealed class HelpWindow : Window
         });
         var titleStack = new StackPanel { Spacing = 2 };
         titleStack.Children.Add(new TextBlock { Text = "HyperTool Guest Hilfe", FontSize = 24, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        titleStack.Children.Add(new TextBlock { Text = "Kurzübersicht über Guest-Funktionen und Einstellungen", Opacity = 0.8 });
+        titleStack.Children.Add(new TextBlock { Text = "Kurzübersicht über aktuelle Guest-Funktionen", Opacity = 0.8 });
         headerRow.Children.Add(titleStack);
         headerCard.Child = headerRow;
         root.Children.Add(headerCard);
 
         var bodyCard = CreateCard(12);
         var bodyStack = new StackPanel { Spacing = 12 };
-        bodyStack.Children.Add(CreateSection("USB Modus", "In den Einstellungen kannst du zwischen Hyper-V Socket (bevorzugt) und IP-Mode umschalten."));
-        bodyStack.Children.Add(CreateSection("Transport-Status", "Im USB-Host-Bereich zeigen Status-Chips den aktiven Transportmodus (Hyper-V Socket / IP-Mode) direkt und gut sichtbar an."));
-        bodyStack.Children.Add(CreateSection("USB Tray", "Im Tray-Control-Center stehen USB-Schnellaktionen bereit. Wenn der Client fehlt, erscheint ein Installationsbutton mit automatischem Download und Installer-Start aus dem offiziellen GitHub-Release."));
-        bodyStack.Children.Add(CreateSection("Sofortige Modusanzeige", "Nach Aktivieren/Deaktivieren von Hyper-V Socket wird der Modus im USB-Bereich sofort aktualisiert (ohne manuelles Refresh)."));
-        bodyStack.Children.Add(CreateSection("Transport Diagnose", "Im Info-Bereich siehst du Hyper-V Socket-, Registry- und Fallback-Status live; der Test-Button startet eine direkte Socket-Prüfung."));
-        bodyStack.Children.Add(CreateSection("Auto-Connect", "Für das ausgewählte USB-Gerät kann Auto-Connect aktiviert werden. Das Gerät verbindet sich dann automatisch nach Refresh/Freigabe."));
-        bodyStack.Children.Add(CreateSection("Einstellungen", "Tasktray-Verhalten, Start mit Windows, Start minimiert, Updatecheck beim Start und Theme konfigurieren."));
+        bodyStack.Children.Add(CreateSection("USB Transport", "Für USB kannst du zwischen Hyper-V Socket (bevorzugt) und IP-Mode umschalten. Der aktive Zustand wird direkt im USB-Bereich angezeigt."));
+        bodyStack.Children.Add(CreateSection("USB Status", "Im USB-Menü steht oben rechts ein Aktiv/Inaktiv-Status-Chip. Ist USB durch den Host deaktiviert, erscheint im Tabellenbereich ein zentrierter Hinweis 'Deaktiviert'; nach Host-Aktivierung wird nach ca. 1 Sekunde automatisch neu geladen."));
+        bodyStack.Children.Add(CreateSection("USB Auto-Connect", "Für das ausgewählte Gerät kann Auto-Connect aktiviert werden. Die Verbindung erfolgt dann automatisch nach einem Refresh."));
+        bodyStack.Children.Add(CreateSection("Shared Folder", "Shared Folder läuft über Hyper-V Socket / HyperTool File Service und benötigt im Guest zusätzlich WinFsp. Der Bereich nutzt ebenfalls den Aktiv/Inaktiv-Status-Chip. Bei deaktivierter Funktion zeigt die Tabelle zentral 'Deaktiviert' und wird nach Reaktivierung automatisch aktualisiert."));
+        bodyStack.Children.Add(CreateSection("Shared Folder Anwenden", "Änderungen an einzelnen Shares werden gesammelt und erst über 'Änderungen anwenden' aktiv, damit laufende Zugriffe auf andere Shares stabil bleiben."));
+        bodyStack.Children.Add(CreateSection("Transport Diagnose", "Im Info-Bereich siehst du Hyper-V Socket-, Registry- und Fallback-Status; der Test-Button prüft den Socket direkt."));
+        bodyStack.Children.Add(CreateSection("Einstellungen", "Tasktray-Verhalten, Start mit Windows, Start minimiert, Updatecheck beim Start und Theme konfigurieren. Über 'Tool neu starten' wird die App mit kurzem Reload-Screen neu geladen."));
         bodyStack.Children.Add(CreateSection("Single Instance", "Ein zweiter Start blendet die bereits laufende Guest-App ein."));
         bodyStack.Children.Add(CreateSection("Tray Control Center", "Linksklick und Rechtsklick im Tray öffnen das USB-zentrierte Control Center mit Schnellaktionen."));
         bodyStack.Children.Add(CreateSection("Logs", "'Logs öffnen' öffnet immer den Log-Ordner (nicht einzelne Dateien)."));

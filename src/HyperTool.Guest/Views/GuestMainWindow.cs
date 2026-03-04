@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Shapes;
+using Microsoft.Win32;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -32,7 +33,9 @@ internal sealed class GuestMainWindow : Window
     }
 
     public const int DefaultWindowWidth = 1400;
-    public const int DefaultWindowHeight = 940;
+    public const int DefaultWindowHeight = 860;
+    private const string ToolRestartIcon = "↻";
+    private const string ToolRestartLabel = "Tool neu starten";
     private const int GuestSplashMinVisibleMs = 900;
     private const int GuestSplashStatusCycleMs = 420;
     private const string UpdateOwner = "koerby";
@@ -41,6 +44,9 @@ internal sealed class GuestMainWindow : Window
     private const string GuestUsbRuntimeOwner = "vadimgrn";
     private const string GuestUsbRuntimeRepo = "usbip-win2";
     private const string GuestUsbRuntimeAssetHint = "x64-release";
+    private const string WinFspRuntimeOwner = "winfsp";
+    private const string WinFspRuntimeRepo = "winfsp";
+    private const string WinFspRuntimeAssetHint = ".msi";
 
     private readonly Func<Task<IReadOnlyList<UsbIpDeviceInfo>>> _refreshUsbDevicesAsync;
     private readonly Func<string, Task<int>> _connectUsbAsync;
@@ -50,7 +56,7 @@ internal sealed class GuestMainWindow : Window
     private readonly Func<Task<(bool hyperVSocketActive, bool registryServiceOk)>> _runTransportDiagnosticsTestAsync;
     private readonly Func<Task<string?>> _discoverUsbHostAddressAsync;
     private readonly Func<Task<IReadOnlyList<HostSharedFolderDefinition>>> _fetchHostSharedFoldersAsync;
-    private readonly bool _isUsbClientAvailable;
+    private bool _isUsbClientAvailable;
     private readonly IUpdateService _updateService = new GitHubUpdateService();
     private static readonly HttpClient UpdateDownloadClient = new();
 
@@ -74,6 +80,9 @@ internal sealed class GuestMainWindow : Window
     private Button? _installUpdateButton;
     private readonly Ellipse _usbRuntimeStatusDot = new() { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _usbRuntimeStatusText = new() { Opacity = 0.9, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Border _usbHostFeatureStatusChip = new() { CornerRadius = new CornerRadius(9), MinHeight = 30, BorderThickness = new Thickness(1), Padding = new Thickness(10, 5, 10, 5), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _usbHostFeatureStatusChipText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+    private readonly TextBlock _usbDisabledOverlayText = new() { Text = "Deaktiviert", Opacity = 0.34, FontSize = 34, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
     private readonly TextBlock _diagHyperVSocketText = new() { Text = "Unbekannt", Opacity = 0.9 };
     private readonly TextBlock _diagRegistryServiceText = new() { Text = "Unbekannt", Opacity = 0.9 };
     private readonly TextBlock _diagFallbackText = new() { Text = "Nein", Opacity = 0.9 };
@@ -86,22 +95,41 @@ internal sealed class GuestMainWindow : Window
     private bool _updateAvailable;
 
     private readonly ListView _usbListView = new();
+    private readonly CheckBox _usbFeatureEnabledCheckBox = new() { Content = "USB Funktion aktiv" };
     private readonly ObservableCollection<GuestSharedFolderMapping> _sharedFolderMappings = [];
     private readonly ListView _sharedFolderMappingsListView = new();
-    private readonly Ellipse _sharedFolderCredentialSocketStatusDot = new() { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBlock _sharedFolderCredentialSocketStatusText = new() { Opacity = 0.9, VerticalAlignment = VerticalAlignment.Center };
+    private readonly CheckBox _sharedFolderFeatureEnabledCheckBox = new() { Content = "Shared-Folder Funktion aktiv" };
+    private readonly ComboBox _sharedFolderBaseDriveCombo = new() { Width = 90, MinWidth = 90, HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly Border _sharedFolderSettingsPanel = new();
+    private Button? _sharedFolderSaveDriveButton;
     private readonly TextBlock _sharedFolderReconnectStatusText = new() { Text = "Reconnect: inaktiv · Letzter Lauf: noch keiner", Opacity = 0.84, TextWrapping = TextWrapping.Wrap };
-    private readonly TextBlock _sharedFolderHostDiscoveryText = new() { Text = "Ermittelter Hostname: -", Opacity = 0.84, TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock _sharedFolderStatusText = new() { Text = "Bereit.", Opacity = 0.88, TextWrapping = TextWrapping.Wrap };
-    private readonly GuestDriveMappingService _driveMappingService = new();
+    private readonly Border _sharedFolderHostFeatureStatusChip = new() { CornerRadius = new CornerRadius(9), MinHeight = 30, BorderThickness = new Thickness(1), Padding = new Thickness(10, 5, 10, 5), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _sharedFolderHostFeatureStatusChipText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+    private readonly TextBlock _sharedFolderDisabledOverlayText = new() { Text = "Deaktiviert", Opacity = 0.34, FontSize = 34, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+    private readonly Ellipse _winFspRuntimeStatusDot = new() { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _winFspRuntimeStatusText = new() { Opacity = 0.9, VerticalAlignment = VerticalAlignment.Center };
+    private Button? _winFspRuntimeInstallButton;
+    private Button? _winFspRuntimeRestartButton;
+    private readonly GuestWinFspMountService _winFspMountService = GuestWinFspMountRegistry.Instance;
     private readonly SemaphoreSlim _sharedFolderUiOperationGate = new(1, 1);
     private CancellationTokenSource? _sharedFolderAutoApplyCts;
     private bool _suppressSharedFolderAutoApply;
+    private bool _suppressUsbFeatureToggle;
+    private bool _suppressSharedFolderFeatureToggle;
+    private bool _suppressSharedFolderBaseDriveChange;
     private string _sharedFolderLastError = "-";
+    private string _savedSharedFolderBaseDriveLetter = "Z";
+    private string _pendingSharedFolderBaseDriveLetter = "Z";
+    private bool _usbHostFeatureReactivationPending;
+    private bool _sharedFolderHostFeatureReactivationPending;
+    private int _usbHostFeatureReactivationToken;
+    private int _sharedFolderHostFeatureReactivationToken;
     private Button? _usbRefreshButton;
     private Button? _usbConnectButton;
     private Button? _usbDisconnectButton;
     private Button? _usbRuntimeInstallButton;
+    private Button? _usbRuntimeRestartButton;
     private readonly ComboBox _themeCombo = new();
     private readonly ToggleSwitch _themeToggle = new();
     private readonly TextBlock _themeText = new();
@@ -599,8 +627,24 @@ internal sealed class GuestMainWindow : Window
             return;
         }
 
+        if (devices.Count == 0)
+        {
+            _usbListView.ItemsSource = new[]
+            {
+                "Aktuell keine Geräte zum Connecten vorhanden."
+            };
+            UpdateAutoConnectToggleFromSelection();
+            return;
+        }
+
         _usbListView.ItemsSource = devices.Select(item => item.DisplayName).ToList();
         UpdateAutoConnectToggleFromSelection();
+    }
+
+    public void UpdateUsbClientAvailability(bool isUsbClientAvailable)
+    {
+        _isUsbClientAvailable = isUsbClientAvailable;
+        UpdateUsbRuntimeStatusUi();
     }
 
     public UsbIpDeviceInfo? GetSelectedUsbDevice()
@@ -630,20 +674,6 @@ internal sealed class GuestMainWindow : Window
         var normalizedSummary = string.IsNullOrWhiteSpace(summary) ? "-" : summary.Trim();
 
         _sharedFolderReconnectStatusText.Text = $"Reconnect: {activeText} · Letzter Lauf: {lastRunText} · {normalizedSummary}";
-    }
-
-    public void UpdateSharedFolderCredentialSocketStatus(bool socketActive, DateTimeOffset? lastSyncUtc)
-    {
-        var lastSyncText = lastSyncUtc.HasValue
-            ? lastSyncUtc.Value.ToLocalTime().ToString("HH:mm:ss")
-            : "-";
-
-        _sharedFolderCredentialSocketStatusDot.Fill = new SolidColorBrush(socketActive
-            ? Windows.UI.Color.FromArgb(0xFF, 0x32, 0xD7, 0x4B)
-            : Windows.UI.Color.FromArgb(0xFF, 0xE8, 0x4A, 0x5F));
-        _sharedFolderCredentialSocketStatusText.Text = socketActive
-            ? $"Credential Socket: aktiv · Letzte Sync: {lastSyncText}"
-            : $"Credential Socket: inaktiv · Letzte Sync: {lastSyncText}";
     }
 
     private async Task RunTransportDiagnosticsTestAsync()
@@ -830,7 +860,7 @@ internal sealed class GuestMainWindow : Window
 
         topRowContent.Children.Add(new TextBlock
         {
-            Text = "Guest USB Connect & Management",
+            Text = "Guest USB-Share & Shared Folder Management",
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center
         });
@@ -1248,7 +1278,6 @@ internal sealed class GuestMainWindow : Window
         var nodes = new[]
         {
             (X: 236.0, Y: 260.0, Size: 9.8, Highlight: true, Label: "Host"),
-            (X: 364.0, Y: 298.0, Size: 8.4, Highlight: false, Label: "Mgmt"),
             (X: 504.0, Y: 316.0, Size: 8.6, Highlight: true, Label: "Hyper-V"),
             (X: 642.0, Y: 294.0, Size: 8.4, Highlight: false, Label: (string?)null),
             (X: 780.0, Y: 274.0, Size: 9.4, Highlight: true, Label: "VM"),
@@ -1293,12 +1322,17 @@ internal sealed class GuestMainWindow : Window
 
         var links = new (int From, int To)[]
         {
-            (0,4), (4,1), (1,5), (5,2), (2,6), (6,3), (1,7), (7,8), (8,3)
+            (0,4), (4,1), (1,5), (5,2), (2,6), (6,3), (1,7), (7,3)
         };
 
         for (var i = 0; i < links.Length; i++)
         {
             var (from, to) = links[i];
+            if (from < 0 || from >= nodes.Length || to < 0 || to >= nodes.Length)
+            {
+                continue;
+            }
+
             var a = nodes[from];
             var b = nodes[to];
 
@@ -1436,52 +1470,72 @@ internal sealed class GuestMainWindow : Window
         };
 
         var actionsStack = new StackPanel { Spacing = 5 };
-        actionsStack.Children.Add(new TextBlock
+
+        var headerRow = new Grid { ColumnSpacing = 10 };
+        headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        headerRow.Children.Add(new TextBlock
         {
-            Text = "USB Host-Connect (Host-Freigaben)",
+            Text = "USB-Share (USB/IP-WIN2 Client im Hintergrund)",
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         });
 
-        var runtimeRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        runtimeRow.Children.Add(_usbRuntimeStatusDot);
-        runtimeRow.Children.Add(_usbRuntimeStatusText);
-        actionsStack.Children.Add(runtimeRow);
+        _usbHostFeatureStatusChip.Child = _usbHostFeatureStatusChipText;
+        Grid.SetColumn(_usbHostFeatureStatusChip, 1);
+        headerRow.Children.Add(_usbHostFeatureStatusChip);
+        actionsStack.Children.Add(headerRow);
 
         _usbRuntimeInstallButton = CreateIconButton("⬇", "Installation usbip-win2", onClick: async (_, _) => await InstallGuestUsbRuntimeAsync());
+        _usbRuntimeRestartButton = CreateIconButton(ToolRestartIcon, ToolRestartLabel, onClick: async (_, _) => await RestartGuestToolAsync());
         _usbRuntimeInstallButton.Visibility = Visibility.Collapsed;
-        actionsStack.Children.Add(_usbRuntimeInstallButton);
+        _usbRuntimeRestartButton.Visibility = Visibility.Collapsed;
+        var usbRuntimeActionsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        usbRuntimeActionsRow.Children.Add(_usbRuntimeInstallButton);
+        usbRuntimeActionsRow.Children.Add(_usbRuntimeRestartButton);
+        actionsStack.Children.Add(usbRuntimeActionsRow);
 
-        var actionRow = new Grid { ColumnSpacing = 8 };
-        actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var actionRow = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         _usbRefreshButton = CreateIconButton("⟳", "Refresh", onClick: async (_, _) => await RefreshUsbAsync());
         _usbConnectButton = CreateIconButton("🔌", "Connect", onClick: async (_, _) => await ConnectUsbAsync());
         _usbDisconnectButton = CreateIconButton("⏏", "Disconnect", onClick: async (_, _) => await DisconnectUsbAsync());
 
-        _usbRefreshButton.HorizontalAlignment = HorizontalAlignment.Stretch;
-        _usbConnectButton.HorizontalAlignment = HorizontalAlignment.Stretch;
-        _usbDisconnectButton.HorizontalAlignment = HorizontalAlignment.Stretch;
+        _usbRefreshButton.IsEnabled = IsUsbRefreshAvailable();
+        _usbConnectButton.IsEnabled = IsUsbFeatureUsable();
+        _usbDisconnectButton.IsEnabled = IsUsbFeatureUsable();
 
-        _usbRefreshButton.IsEnabled = _isUsbClientAvailable;
-        _usbConnectButton.IsEnabled = _isUsbClientAvailable;
-        _usbDisconnectButton.IsEnabled = _isUsbClientAvailable;
+        Grid.SetColumn(_usbFeatureEnabledCheckBox, 0);
+        Grid.SetColumn(_usbRefreshButton, 1);
+        Grid.SetColumn(_usbConnectButton, 2);
+        Grid.SetColumn(_usbDisconnectButton, 3);
+        Grid.SetColumn(_usbAutoConnectCheckBox, 4);
 
-        Grid.SetColumn(_usbRefreshButton, 0);
-        Grid.SetColumn(_usbConnectButton, 1);
-        Grid.SetColumn(_usbDisconnectButton, 2);
-
+        actionRow.Children.Add(_usbFeatureEnabledCheckBox);
         actionRow.Children.Add(_usbRefreshButton);
         actionRow.Children.Add(_usbConnectButton);
         actionRow.Children.Add(_usbDisconnectButton);
-        actionsStack.Children.Add(actionRow);
 
-        _usbAutoConnectCheckBox.IsEnabled = _isUsbClientAvailable;
-        _usbAutoConnectCheckBox.Margin = new Thickness(0);
+        _usbAutoConnectCheckBox.IsEnabled = IsUsbFeatureUsable();
+        _usbAutoConnectCheckBox.Margin = new Thickness(6, 0, 0, 0);
+        _usbAutoConnectCheckBox.VerticalAlignment = VerticalAlignment.Center;
+        _usbAutoConnectCheckBox.HorizontalAlignment = HorizontalAlignment.Left;
         _usbAutoConnectCheckBox.Checked += async (_, _) => await SetSelectedUsbDeviceAutoConnectAsync(true);
         _usbAutoConnectCheckBox.Unchecked += async (_, _) => await SetSelectedUsbDeviceAutoConnectAsync(false);
-        actionsStack.Children.Add(_usbAutoConnectCheckBox);
+        actionRow.Children.Add(_usbAutoConnectCheckBox);
+
+        _usbFeatureEnabledCheckBox.Checked += OnUsbFeatureToggleChanged;
+        _usbFeatureEnabledCheckBox.Unchecked += OnUsbFeatureToggleChanged;
+        _usbFeatureEnabledCheckBox.VerticalAlignment = VerticalAlignment.Center;
+        _usbFeatureEnabledCheckBox.HorizontalAlignment = HorizontalAlignment.Left;
+        _usbFeatureEnabledCheckBox.Margin = new Thickness(0, 0, 4, 0);
+        actionsStack.Children.Add(actionRow);
 
         if (!_isUsbClientAvailable)
         {
@@ -1506,8 +1560,28 @@ internal sealed class GuestMainWindow : Window
             BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
             Background = Application.Current.Resources["PanelBackgroundBrush"] as Brush,
             Padding = new Thickness(8),
-            Child = _usbListView
         };
+
+        _usbDisabledOverlayText.Foreground = Application.Current.Resources["TextMutedBrush"] as Brush;
+        var listBody = new Grid();
+        listBody.Children.Add(_usbListView);
+        listBody.Children.Add(_usbDisabledOverlayText);
+
+        var usbStatusOverlay = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(8, 8, 10, 6),
+            Opacity = 0.76,
+            IsHitTestVisible = false
+        };
+        usbStatusOverlay.Children.Add(_usbRuntimeStatusDot);
+        usbStatusOverlay.Children.Add(_usbRuntimeStatusText);
+        listBody.Children.Add(usbStatusOverlay);
+
+        listBorder.Child = listBody;
 
         _usbListView.SelectionChanged += (_, _) => UpdateAutoConnectToggleFromSelection();
 
@@ -1520,7 +1594,6 @@ internal sealed class GuestMainWindow : Window
     private UIElement BuildSharedFoldersPage()
     {
         var root = new Grid { RowSpacing = 10 };
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
@@ -1538,59 +1611,121 @@ internal sealed class GuestMainWindow : Window
         var headerRow = new Grid { ColumnSpacing = 10 };
         headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var titleText = new TextBlock
         {
-            Text = "Shared Folder",
+            Text = "Shared Folder (Netzlaufwerk über WinFsp im Hintergrund)",
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         };
         headerRow.Children.Add(titleText);
 
-        var credentialChipRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-        credentialChipRow.Children.Add(_sharedFolderCredentialSocketStatusDot);
-        credentialChipRow.Children.Add(_sharedFolderCredentialSocketStatusText);
-        Grid.SetColumn(credentialChipRow, 1);
-        headerRow.Children.Add(credentialChipRow);
+        _sharedFolderHostFeatureStatusChip.Child = _sharedFolderHostFeatureStatusChipText;
+        Grid.SetColumn(_sharedFolderHostFeatureStatusChip, 1);
+        headerRow.Children.Add(_sharedFolderHostFeatureStatusChip);
 
         editorStack.Children.Add(headerRow);
 
-        editorStack.Children.Add(new TextBlock
-        {
-            Text = "Ablauf: Host-Liste laden, pro Share Laufwerk setzen, gewünschte Shares per Checkbox aktivieren/deaktivieren (wird direkt angewendet).",
-            Opacity = 0.82,
-            TextWrapping = TextWrapping.Wrap
-        });
+        _winFspRuntimeInstallButton = CreateIconButton("⬇", "WinFsp nachinstallieren", onClick: async (_, _) => await InstallGuestWinFspRuntimeAsync());
+        _winFspRuntimeRestartButton = CreateIconButton(ToolRestartIcon, ToolRestartLabel, onClick: async (_, _) => await RestartGuestToolAsync());
+        var winFspRuntimeActionsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        winFspRuntimeActionsRow.Children.Add(_winFspRuntimeInstallButton);
+        winFspRuntimeActionsRow.Children.Add(_winFspRuntimeRestartButton);
+        editorStack.Children.Add(winFspRuntimeActionsRow);
 
-        var hostSyncRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        hostSyncRow.Children.Add(CreateIconButton("⇅", "Host-Liste laden", onClick: async (_, _) => await SyncSharedFoldersFromHostAsync()));
-        hostSyncRow.Children.Add(CreateIconButton("🧪", "Self-Test", onClick: async (_, _) => await RunSharedFolderSelfTestAsync()));
-        hostSyncRow.Children.Add(CreateIconButton("🔐", "Credentials löschen", onClick: async (_, _) => await ClearStoredSharedFolderCredentialsAsync()));
-        editorStack.Children.Add(hostSyncRow);
+        _sharedFolderFeatureEnabledCheckBox.Checked += OnSharedFolderFeatureToggleChanged;
+        _sharedFolderFeatureEnabledCheckBox.Unchecked += OnSharedFolderFeatureToggleChanged;
+        _sharedFolderFeatureEnabledCheckBox.VerticalAlignment = VerticalAlignment.Center;
+        _sharedFolderFeatureEnabledCheckBox.HorizontalAlignment = HorizontalAlignment.Left;
+        _sharedFolderFeatureEnabledCheckBox.Margin = new Thickness(0);
 
-        editorStack.Children.Add(new TextBlock
+        var settingsStack = new StackPanel { Spacing = 6 };
+
+        if (_sharedFolderBaseDriveCombo.Items.Count == 0)
         {
-            Text = "Host-Liste laden nutzt ausschließlich Hyper-V Socket (kein IP-Fallback).",
+            for (var drive = 'D'; drive <= 'Z'; drive++)
+            {
+                _sharedFolderBaseDriveCombo.Items.Add(drive.ToString());
+            }
+        }
+
+        _sharedFolderBaseDriveCombo.SelectionChanged -= OnSharedFolderBaseDriveSelectionChanged;
+        _sharedFolderBaseDriveCombo.SelectionChanged += OnSharedFolderBaseDriveSelectionChanged;
+
+        var actionsRow = new Grid
+        {
+            ColumnSpacing = 8,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        actionsRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionsRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionsRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionsRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionsRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionsRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionsRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionsRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        actionsRow.Children.Add(_sharedFolderFeatureEnabledCheckBox);
+
+        var refreshHostListButton = CreateIconButton("⟳", "Refresh", onClick: async (_, _) => await SyncSharedFoldersFromHostAsync(forceHostFeatureRefresh: true));
+        Grid.SetColumn(refreshHostListButton, 1);
+        actionsRow.Children.Add(refreshHostListButton);
+
+        var selfTestButton = CreateIconButton("🧪", "Selftest", onClick: async (_, _) => await RunSharedFolderSelfTestAsync());
+        Grid.SetColumn(selfTestButton, 2);
+        actionsRow.Children.Add(selfTestButton);
+
+        var driveLabel = new TextBlock
+        {
+            Text = "Netzlaufwerk",
+            VerticalAlignment = VerticalAlignment.Center,
+            Opacity = 0.9
+        };
+        Grid.SetColumn(driveLabel, 3);
+        actionsRow.Children.Add(driveLabel);
+
+        Grid.SetColumn(_sharedFolderBaseDriveCombo, 4);
+        actionsRow.Children.Add(_sharedFolderBaseDriveCombo);
+
+        _sharedFolderSaveDriveButton = CreateIconButton("💾", "Speichern", onClick: async (_, _) => await SaveSharedFolderBaseDriveAsync());
+        Grid.SetColumn(_sharedFolderSaveDriveButton, 5);
+        actionsRow.Children.Add(_sharedFolderSaveDriveButton);
+
+        settingsStack.Children.Add(actionsRow);
+
+        var hasWinFspRuntime = IsWinFspRuntimeInstalled();
+        if (_winFspRuntimeInstallButton is not null)
+        {
+            _winFspRuntimeInstallButton.Visibility = hasWinFspRuntime ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        if (!hasWinFspRuntime)
+        {
+            settingsStack.Children.Add(new TextBlock
+            {
+                Text = "WinFsp ist nicht installiert. hypertool-file Shared-Folder sind ohne WinFsp nicht nutzbar.",
+                Opacity = 0.88,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
+            });
+        }
+
+        settingsStack.Children.Add(new TextBlock
+        {
+            Text = "Shared-Folder läuft rein über Hyper-V Socket / HyperTool File Service (kein IP-Fallback).",
             Opacity = 0.72,
             TextWrapping = TextWrapping.Wrap
         });
 
-        editorStack.Children.Add(_sharedFolderReconnectStatusText);
-        editorStack.Children.Add(_sharedFolderHostDiscoveryText);
+        _sharedFolderSettingsPanel.Child = settingsStack;
+        editorStack.Children.Add(_sharedFolderSettingsPanel);
 
         editorStack.Children.Add(_sharedFolderStatusText);
         editorCard.Child = editorStack;
         root.Children.Add(editorCard);
 
-        UpdateSharedFolderCredentialSocketStatus(socketActive: false, lastSyncUtc: null);
-
-        var infoText = new TextBlock
-        {
-            Margin = new Thickness(2, 0, 0, 0),
-            Opacity = 0.85,
-            Text = "Für UNC-Pfade mit \\HOST wird bevorzugt der per Hyper-V Socket ermittelte Hostname genutzt (z. B. \\REALHOSTNAME\\Share); IP ist Fallback."
-        };
-        Grid.SetRow(infoText, 1);
-        root.Children.Add(infoText);
+        UpdateWinFspRuntimeStatusUi();
 
         var listCard = new Border
         {
@@ -1606,14 +1741,46 @@ internal sealed class GuestMainWindow : Window
         _sharedFolderMappingsListView.SelectionMode = ListViewSelectionMode.None;
         _sharedFolderMappingsListView.IsItemClickEnabled = false;
 
-        listCard.Child = _sharedFolderMappingsListView;
-        Grid.SetRow(listCard, 2);
+        _sharedFolderDisabledOverlayText.Foreground = Application.Current.Resources["TextMutedBrush"] as Brush;
+        var listBody = new Grid();
+        listBody.Children.Add(_sharedFolderMappingsListView);
+        listBody.Children.Add(_sharedFolderDisabledOverlayText);
+
+        var sharedFolderStatusOverlay = new StackPanel
+        {
+            Spacing = 4,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(8, 8, 10, 6),
+            Opacity = 0.74,
+            IsHitTestVisible = false
+        };
+        var winFspOverlayRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right };
+        winFspOverlayRow.Children.Add(_winFspRuntimeStatusDot);
+        winFspOverlayRow.Children.Add(_winFspRuntimeStatusText);
+        sharedFolderStatusOverlay.Children.Add(winFspOverlayRow);
+
+        _sharedFolderReconnectStatusText.HorizontalAlignment = HorizontalAlignment.Right;
+        _sharedFolderReconnectStatusText.VerticalAlignment = VerticalAlignment.Center;
+        _sharedFolderReconnectStatusText.Margin = new Thickness(0);
+        _sharedFolderReconnectStatusText.Opacity = 1.0;
+        _sharedFolderReconnectStatusText.IsHitTestVisible = false;
+        sharedFolderStatusOverlay.Children.Add(_sharedFolderReconnectStatusText);
+        listBody.Children.Add(sharedFolderStatusOverlay);
+
+        listCard.Child = listBody;
+        Grid.SetRow(listCard, 1);
         root.Children.Add(listCard);
 
         RefreshSharedFolderMappingsFromConfig();
+        UpdateSharedFolderFeatureUi();
         UpdateHostDiscoveryPresentation();
-        _ = SyncSharedFoldersFromHostAsync();
+        _ = SyncSharedFoldersFromHostAsync(forceHostFeatureRefresh: false);
         _ = RefreshSharedFolderMountStatesSafeAsync();
+        if (!IsSharedFolderFeatureEnabled())
+        {
+            _ = ApplySharedFolderSelectionAsync(autoTriggered: true);
+        }
 
         return root;
     }
@@ -1626,15 +1793,16 @@ internal sealed class GuestMainWindow : Window
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width='36'/>
             <ColumnDefinition Width='32'/>
-            <ColumnDefinition Width='80'/>
             <ColumnDefinition Width='*'/>
             <ColumnDefinition Width='90'/>
         </Grid.ColumnDefinitions>
         <CheckBox IsChecked='{Binding Enabled, Mode=TwoWay}' VerticalAlignment='Center' HorizontalAlignment='Left'/>
         <TextBlock Grid.Column='1' Text='{Binding MountStateDot}' VerticalAlignment='Center' HorizontalAlignment='Center' FontSize='12'/>
-        <TextBox Grid.Column='2' Text='{Binding DriveLetter, Mode=TwoWay}' MaxLength='2' Width='54' VerticalAlignment='Center'/>
-        <TextBlock Grid.Column='3' Text='{Binding SharePath}' FontWeight='SemiBold' Opacity='0.9' TextTrimming='CharacterEllipsis' TextWrapping='NoWrap'/>
-        <TextBlock Grid.Column='4' Text='{Binding MountStateText}' Opacity='0.82' TextTrimming='CharacterEllipsis' TextWrapping='NoWrap'/>
+        <StackPanel Grid.Column='2' Spacing='1' VerticalAlignment='Center'>
+            <TextBlock Text='{Binding Label}' FontWeight='SemiBold' Opacity='0.95' TextTrimming='CharacterEllipsis' TextWrapping='NoWrap'/>
+            <TextBlock Text='{Binding SharePath}' Opacity='0.72' FontSize='11' TextTrimming='CharacterEllipsis' TextWrapping='NoWrap'/>
+        </StackPanel>
+        <TextBlock Grid.Column='3' Text='{Binding MountStateText}' Opacity='0.82' TextTrimming='CharacterEllipsis' TextWrapping='NoWrap'/>
     </Grid>
 </DataTemplate>
 """;
@@ -1654,6 +1822,27 @@ internal sealed class GuestMainWindow : Window
 
         _config.SharedFolders ??= new GuestSharedFolderSettings();
         _config.SharedFolders.Mappings ??= [];
+        _suppressSharedFolderFeatureToggle = true;
+        try
+        {
+            _sharedFolderFeatureEnabledCheckBox.IsChecked = _config.SharedFolders.Enabled;
+        }
+        finally
+        {
+            _suppressSharedFolderFeatureToggle = false;
+        }
+
+        _suppressSharedFolderBaseDriveChange = true;
+        try
+        {
+            _savedSharedFolderBaseDriveLetter = GuestConfigService.NormalizeDriveLetter(_config.SharedFolders.BaseDriveLetter);
+            _pendingSharedFolderBaseDriveLetter = _savedSharedFolderBaseDriveLetter;
+            _sharedFolderBaseDriveCombo.SelectedItem = _pendingSharedFolderBaseDriveLetter;
+        }
+        finally
+        {
+            _suppressSharedFolderBaseDriveChange = false;
+        }
 
         var normalizedMappings = new List<GuestSharedFolderMapping>();
         foreach (var mapping in _config.SharedFolders.Mappings)
@@ -1678,7 +1867,7 @@ internal sealed class GuestMainWindow : Window
             normalizedMappings.Add(new GuestSharedFolderMapping
             {
                 Id = mapping.Id,
-                Label = string.IsNullOrWhiteSpace(mapping.Label) ? normalizedSharePath : mapping.Label,
+                Label = ResolveMappingLabel(mapping.Label, normalizedSharePath),
                 SharePath = normalizedSharePath,
                 DriveLetter = normalizedDriveLetter,
                 Persistent = true,
@@ -1687,8 +1876,6 @@ internal sealed class GuestMainWindow : Window
                 MountStateText = mapping.Enabled ? "getrennt" : "deaktiviert"
             });
         }
-
-        EnsureUniqueDriveLetters(normalizedMappings);
 
         _sharedFolderMappings.Clear();
         foreach (var mapping in normalizedMappings)
@@ -1715,13 +1902,226 @@ internal sealed class GuestMainWindow : Window
             return;
         }
 
-        if (!string.Equals(e.PropertyName, nameof(GuestSharedFolderMapping.Enabled), StringComparison.Ordinal)
-            && !string.Equals(e.PropertyName, nameof(GuestSharedFolderMapping.DriveLetter), StringComparison.Ordinal))
+        if (!string.Equals(e.PropertyName, nameof(GuestSharedFolderMapping.Enabled), StringComparison.Ordinal))
         {
             return;
         }
 
         ScheduleSharedFolderAutoApply();
+    }
+
+    private void OnSharedFolderFeatureToggleChanged(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSharedFolderFeatureToggle)
+        {
+            return;
+        }
+
+        if (!IsWinFspRuntimeInstalled())
+        {
+            _suppressSharedFolderFeatureToggle = true;
+            try
+            {
+                _sharedFolderFeatureEnabledCheckBox.IsChecked = false;
+            }
+            finally
+            {
+                _suppressSharedFolderFeatureToggle = false;
+            }
+
+            _config.SharedFolders ??= new GuestSharedFolderSettings();
+            _config.SharedFolders.Enabled = false;
+            _ = SaveConfigQuietlyAsync();
+            UpdateSharedFolderFeatureUi();
+            _sharedFolderStatusText.Text = "Shared-Folder Funktion deaktiviert: WinFsp Runtime ist nicht installiert.";
+            return;
+        }
+
+        var enabled = _sharedFolderFeatureEnabledCheckBox.IsChecked == true;
+        _config.SharedFolders ??= new GuestSharedFolderSettings();
+        _config.SharedFolders.Enabled = enabled;
+        UpdateSharedFolderFeatureUi();
+        ScheduleSharedFolderAutoApply();
+    }
+
+    private async void OnUsbFeatureToggleChanged(object sender, RoutedEventArgs e)
+    {
+        if (_suppressUsbFeatureToggle)
+        {
+            return;
+        }
+
+        if (!_isUsbClientAvailable)
+        {
+            _suppressUsbFeatureToggle = true;
+            try
+            {
+                _usbFeatureEnabledCheckBox.IsChecked = false;
+            }
+            finally
+            {
+                _suppressUsbFeatureToggle = false;
+            }
+
+            _config.Usb ??= new GuestUsbSettings();
+            _config.Usb.Enabled = false;
+            await SaveConfigQuietlyAsync();
+            UpdateUsbRuntimeStatusUi();
+            AppendNotification("[Warn] USB-Share bleibt deaktiviert, bis usbip-win2 installiert ist.");
+            return;
+        }
+
+        var enabled = _usbFeatureEnabledCheckBox.IsChecked == true;
+        _config.Usb ??= new GuestUsbSettings();
+        _config.Usb.Enabled = enabled;
+        UpdateUsbRuntimeStatusUi();
+
+        await _saveConfigAsync(_config);
+
+        if (!enabled)
+        {
+            UpdateUsbDevices(Array.Empty<UsbIpDeviceInfo>());
+            AppendNotification("[Info] USB Funktion lokal deaktiviert.");
+            return;
+        }
+
+        AppendNotification("[Info] USB Funktion lokal aktiviert. Aktualisiere Geräteansicht …");
+        await RefreshUsbAsync();
+    }
+
+    private void OnSharedFolderBaseDriveSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSharedFolderBaseDriveChange)
+        {
+            return;
+        }
+
+        if (_sharedFolderBaseDriveCombo.SelectedItem is not string selectedLetter || string.IsNullOrWhiteSpace(selectedLetter))
+        {
+            return;
+        }
+
+        _pendingSharedFolderBaseDriveLetter = GuestConfigService.NormalizeDriveLetter(selectedLetter);
+        MarkSharedFolderSelectionPending();
+    }
+
+    private void MarkSharedFolderSelectionPending()
+    {
+        if (string.Equals(_pendingSharedFolderBaseDriveLetter, _savedSharedFolderBaseDriveLetter, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _sharedFolderStatusText.Text = $"Laufwerkswechsel vorgemerkt: {_savedSharedFolderBaseDriveLetter}: → {_pendingSharedFolderBaseDriveLetter}:. Mit 'Laufwerk speichern' übernehmen.";
+    }
+
+    private void UpdateSharedFolderFeatureUi()
+    {
+        var hostEnabled = IsSharedFolderFeatureEnabledByHost();
+        var localEnabled = IsSharedFolderFeatureLocallyEnabled();
+        var winFspAvailable = IsWinFspRuntimeInstalled();
+
+        if (!winFspAvailable && localEnabled)
+        {
+            _config.SharedFolders ??= new GuestSharedFolderSettings();
+            _config.SharedFolders.Enabled = false;
+            localEnabled = false;
+            _ = SaveConfigQuietlyAsync();
+        }
+
+        var effectiveEnabled = hostEnabled && localEnabled && winFspAvailable;
+        var interactive = effectiveEnabled && !_sharedFolderHostFeatureReactivationPending;
+
+        _sharedFolderFeatureEnabledCheckBox.IsEnabled = hostEnabled && winFspAvailable;
+        _sharedFolderSettingsPanel.IsHitTestVisible = true;
+        _sharedFolderSettingsPanel.Opacity = 1.0;
+        _sharedFolderMappingsListView.IsEnabled = interactive;
+        _sharedFolderBaseDriveCombo.IsEnabled = interactive;
+        if (_sharedFolderSaveDriveButton is not null)
+        {
+            _sharedFolderSaveDriveButton.IsEnabled = interactive;
+        }
+        _sharedFolderDisabledOverlayText.Visibility = interactive ? Visibility.Collapsed : Visibility.Visible;
+
+        var sharedFolderChipPalette = ResolveHostFeatureChipPalette(effectiveEnabled);
+        _sharedFolderHostFeatureStatusChip.Background = sharedFolderChipPalette.chipBackground;
+        _sharedFolderHostFeatureStatusChip.BorderBrush = sharedFolderChipPalette.chipBorder;
+        _sharedFolderHostFeatureStatusChipText.Text = effectiveEnabled ? "Aktiv" : "Inaktiv";
+        _sharedFolderHostFeatureStatusChipText.Foreground = sharedFolderChipPalette.textForeground;
+
+        if (!hostEnabled)
+        {
+            _sharedFolderStatusText.Text = "Shared-Folder sind durch den Host deaktiviert.";
+        }
+        else if (!winFspAvailable)
+        {
+            _sharedFolderStatusText.Text = "Shared-Folder sind deaktiviert: WinFsp Runtime ist nicht installiert.";
+        }
+        else if (!localEnabled)
+        {
+            _sharedFolderStatusText.Text = "Shared-Folder Funktion lokal deaktiviert.";
+        }
+    }
+
+    private bool IsSharedFolderFeatureEnabled()
+    {
+        return IsSharedFolderFeatureEnabledByHost() && IsSharedFolderFeatureLocallyEnabled() && IsWinFspRuntimeInstalled();
+    }
+
+    private bool IsSharedFolderFeatureLocallyEnabled()
+    {
+        return _config.SharedFolders?.Enabled ?? true;
+    }
+
+    private bool IsSharedFolderFeatureEnabledByHost()
+    {
+        return _config.SharedFolders?.HostFeatureEnabled != false;
+    }
+
+    private bool IsUsbFeatureEnabledByHost()
+    {
+        return _config.Usb?.HostFeatureEnabled != false;
+    }
+
+    private bool IsUsbFeatureLocallyEnabled()
+    {
+        return _config.Usb?.Enabled != false;
+    }
+
+    private bool IsUsbRefreshAvailable()
+    {
+        return _isUsbClientAvailable && IsUsbFeatureLocallyEnabled();
+    }
+
+    private bool IsUsbFeatureUsable()
+    {
+        return _isUsbClientAvailable && IsUsbFeatureEnabledByHost() && IsUsbFeatureLocallyEnabled();
+    }
+
+    private string GetSharedFolderBaseDriveLetter()
+    {
+        _config.SharedFolders ??= new GuestSharedFolderSettings();
+        _savedSharedFolderBaseDriveLetter = GuestConfigService.NormalizeDriveLetter(_savedSharedFolderBaseDriveLetter);
+        _config.SharedFolders.BaseDriveLetter = _savedSharedFolderBaseDriveLetter;
+        return _savedSharedFolderBaseDriveLetter;
+    }
+
+    private async Task SaveSharedFolderBaseDriveAsync()
+    {
+        if (string.Equals(_pendingSharedFolderBaseDriveLetter, _savedSharedFolderBaseDriveLetter, StringComparison.OrdinalIgnoreCase))
+        {
+            _sharedFolderStatusText.Text = $"Laufwerksbuchstabe unverändert ({_savedSharedFolderBaseDriveLetter}:).";
+            return;
+        }
+
+        var previousBaseDriveLetter = _savedSharedFolderBaseDriveLetter;
+        _savedSharedFolderBaseDriveLetter = _pendingSharedFolderBaseDriveLetter;
+        _config.SharedFolders ??= new GuestSharedFolderSettings();
+        _config.SharedFolders.BaseDriveLetter = _savedSharedFolderBaseDriveLetter;
+
+        await SaveSharedFolderMappingsToConfigAsync();
+        await _winFspMountService.UnmountAsync(previousBaseDriveLetter, CancellationToken.None);
+        await ApplySharedFolderSelectionAsync(autoTriggered: false);
     }
 
     private void ScheduleSharedFolderAutoApply()
@@ -1786,8 +2186,19 @@ internal sealed class GuestMainWindow : Window
     private async Task RefreshSharedFolderMountStatesAsync()
     {
         var mappingsSnapshot = _sharedFolderMappings.ToList();
+        var featureEnabled = IsSharedFolderFeatureEnabled();
+        var baseDriveLetter = GetSharedFolderBaseDriveLetter();
+        var isCatalogMounted = featureEnabled && _winFspMountService.IsMounted(baseDriveLetter);
+
         foreach (var mapping in mappingsSnapshot)
         {
+            if (!featureEnabled)
+            {
+                mapping.MountStateDot = "⚪";
+                mapping.MountStateText = "deaktiviert";
+                continue;
+            }
+
             if (!mapping.Enabled)
             {
                 mapping.MountStateDot = "⚪";
@@ -1797,26 +2208,10 @@ internal sealed class GuestMainWindow : Window
 
             try
             {
-                var normalizedDriveLetter = GuestConfigService.NormalizeDriveLetter(mapping.DriveLetter);
-                var status = await _driveMappingService.QueryMappingAsync(normalizedDriveLetter, CancellationToken.None);
-                var isMounted = status.Exists
-                               && _driveMappingService.IsExpectedMapping(status.RemotePath, mapping.SharePath, ResolveSharedFolderHostTarget());
-
-                mapping.MountStateDot = isMounted ? "🟢" : "🔴";
-                mapping.MountStateText = isMounted ? "verbunden" : "getrennt";
-
-                if (!isMounted && status.Exists)
-                {
-                    GuestLogger.Warn("sharedfolders.status.mismatch", "Laufwerk existiert, Zielpfad passt nicht zur Konfiguration.", new
-                    {
-                        mapping.Id,
-                        mapping.Label,
-                        mapping.SharePath,
-                        mapping.DriveLetter,
-                        mappedRemotePath = status.RemotePath,
-                        hostAddress = ResolveSharedFolderHostTarget()
-                    });
-                }
+                mapping.MountStateDot = isCatalogMounted ? "🟢" : "🔴";
+                mapping.MountStateText = isCatalogMounted
+                    ? $"verbunden ({baseDriveLetter}:)"
+                    : $"getrennt ({baseDriveLetter}:)";
             }
             catch (Exception ex)
             {
@@ -1854,246 +2249,87 @@ internal sealed class GuestMainWindow : Window
 
         try
         {
-        _suppressSharedFolderAutoApply = true;
-        if (!ValidateSharedFolderMappings(out var validationError))
-        {
-            _sharedFolderStatusText.Text = validationError;
-            return;
-        }
-
-        await SaveSharedFolderMappingsToConfigAsync();
-
-        var activatedCount = 0;
-        var deactivatedCount = 0;
-        var failedCount = 0;
-        var firstError = string.Empty;
-        var credentialPromptAttempted = false;
-
-        var mappingsSnapshot = _sharedFolderMappings
-            .Select(item => new GuestSharedFolderMapping
+            _suppressSharedFolderAutoApply = true;
+            if (!ValidateSharedFolderMappings(out var validationError))
             {
-                Id = item.Id,
-                Label = item.Label,
-                SharePath = item.SharePath,
-                DriveLetter = GuestConfigService.NormalizeDriveLetter(item.DriveLetter),
-                Persistent = true,
-                Enabled = item.Enabled
-            })
-            .ToList();
+                _sharedFolderStatusText.Text = validationError;
+                return;
+            }
 
-        foreach (var mapping in mappingsSnapshot)
-        {
+            await SaveSharedFolderMappingsToConfigAsync();
+
+            var prefix = autoTriggered ? "Automatisch angewendet" : "Auswahl angewendet";
+            var baseDriveLetter = GetSharedFolderBaseDriveLetter();
+
+            if (!IsSharedFolderFeatureEnabled())
+            {
+                var legacyDriveLetters = _sharedFolderMappings
+                    .Select(item => GuestConfigService.NormalizeDriveLetter(item.DriveLetter))
+                    .Append(baseDriveLetter)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                await _winFspMountService.UnmountManyAsync(legacyDriveLetters, CancellationToken.None);
+                await RefreshSharedFolderMountStatesSafeAsync();
+                _sharedFolderStatusText.Text = $"{prefix}: Shared-Folder Funktion deaktiviert · Laufwerk getrennt.";
+                _sharedFolderLastError = "-";
+                return;
+            }
+
+            var enabledMappings = _sharedFolderMappings
+                .Where(item => item.Enabled && !string.IsNullOrWhiteSpace(item.SharePath))
+                .Select(item => new GuestSharedFolderMapping
+                {
+                    Id = item.Id,
+                    Label = item.Label,
+                    SharePath = item.SharePath,
+                    DriveLetter = baseDriveLetter,
+                    Persistent = true,
+                    Enabled = true
+                })
+                .ToList();
+
+            if (enabledMappings.Count == 0)
+            {
+                await _winFspMountService.EnsureCatalogMountedAsync(baseDriveLetter, enabledMappings, CancellationToken.None);
+                await RefreshSharedFolderMountStatesSafeAsync();
+                _sharedFolderStatusText.Text = $"{prefix}: Laufwerk {baseDriveLetter}: bleibt verbunden · keine aktiven Shares.";
+                _sharedFolderLastError = "-";
+                return;
+            }
+
             try
             {
-                if (mapping.Enabled)
+                await _winFspMountService.EnsureCatalogMountedAsync(baseDriveLetter, enabledMappings, CancellationToken.None);
+                await RefreshSharedFolderMountStatesSafeAsync();
+                _sharedFolderStatusText.Text = $"{prefix}: 1 Laufwerk ({baseDriveLetter}:) aktiv mit {enabledMappings.Count} Share-Ordnern.";
+                _sharedFolderLastError = "-";
+
+                GuestLogger.Info("sharedfolders.apply.catalog_ready", "Shared-Folder Katalog-Mount aktiv.", new
                 {
-                    await _driveMappingService.MountAsync(mapping, ResolveSharedFolderHostTarget(), _config.Credential, CancellationToken.None);
-                    activatedCount++;
-                    GuestLogger.Info("sharedfolders.apply.mounted", "Shared-Folder gemappt.", new
-                    {
-                        mapping.Id,
-                        mapping.Label,
-                        mapping.SharePath,
-                        mapping.DriveLetter,
-                        hostAddress = ResolveSharedFolderHostTarget()
-                    });
-                }
-                else
-                {
-                    await _driveMappingService.UnmountAsync(mapping.DriveLetter, CancellationToken.None);
-                    deactivatedCount++;
-                    GuestLogger.Info("sharedfolders.apply.unmounted", "Shared-Folder getrennt.", new
-                    {
-                        mapping.Id,
-                        mapping.Label,
-                        mapping.SharePath,
-                        mapping.DriveLetter
-                    });
-                }
+                    driveLetter = baseDriveLetter,
+                    count = enabledMappings.Count,
+                    mode = "hypertool-file-catalog"
+                });
             }
             catch (Exception ex)
             {
-                if (mapping.Enabled
-                    && !credentialPromptAttempted
-                    && IsLikelyCredentialIssue(ex.Message))
+                await RefreshSharedFolderMountStatesSafeAsync();
+                _sharedFolderLastError = ex.Message;
+                _sharedFolderStatusText.Text = $"{prefix}: Fehler beim Katalog-Mount ({baseDriveLetter}:). {ex.Message}";
+                GuestLogger.Warn("sharedfolders.apply.catalog_failed", ex.Message, new
                 {
-                    credentialPromptAttempted = true;
-
-                    var promptResult = await PromptForSharedFolderCredentialsAsync(mapping.SharePath);
-                    if (promptResult.Submitted)
-                    {
-                        _config.Credential ??= new GuestCredential();
-                        _config.Credential.Username = (promptResult.Username ?? string.Empty).Trim();
-                        _config.Credential.Password = promptResult.Password ?? string.Empty;
-                        await _saveConfigAsync(_config);
-
-                        try
-                        {
-                            await _driveMappingService.MountAsync(mapping, ResolveSharedFolderHostTarget(), _config.Credential, CancellationToken.None);
-                            activatedCount++;
-                            GuestLogger.Info("sharedfolders.apply.mounted", "Shared-Folder nach Credential-Eingabe gemappt.", new
-                            {
-                                mapping.Id,
-                                mapping.Label,
-                                mapping.SharePath,
-                                mapping.DriveLetter,
-                                hostAddress = ResolveSharedFolderHostTarget(),
-                                credentialUser = _config.Credential.Username
-                            });
-                            continue;
-                        }
-                        catch (Exception retryEx)
-                        {
-                            ex = retryEx;
-                        }
-                    }
-                    else
-                    {
-                        ex = new InvalidOperationException("Anmeldung für SMB-Freigabe wurde abgebrochen.", ex);
-                    }
-                }
-
-                failedCount++;
-                if (string.IsNullOrWhiteSpace(firstError))
-                {
-                    firstError = ex.Message;
-                }
-
-                GuestLogger.Warn("sharedfolders.apply.failed", ex.Message, new
-                {
-                    mapping.Id,
-                    mapping.Label,
-                    mapping.SharePath,
-                    mapping.DriveLetter,
-                    mapping.Enabled,
-                    hostAddress = ResolveSharedFolderHostTarget(),
+                    driveLetter = baseDriveLetter,
+                    count = enabledMappings.Count,
                     exceptionType = ex.GetType().FullName
                 });
             }
-        }
-
-        _sharedFolderMappingsListView.ItemsSource = null;
-        _sharedFolderMappingsListView.ItemsSource = _sharedFolderMappings;
-        await RefreshSharedFolderMountStatesSafeAsync();
-
-        var prefix = autoTriggered ? "Automatisch angewendet" : "Auswahl angewendet";
-        _sharedFolderStatusText.Text = failedCount == 0
-            ? $"{prefix}: {activatedCount} aktiv, {deactivatedCount} deaktiviert."
-            : $"{prefix}: {activatedCount} aktiv, {deactivatedCount} deaktiviert, {failedCount} Fehler. {firstError}";
-
-        if (failedCount == 0)
-        {
-            _sharedFolderLastError = "-";
-        }
-        else if (!string.IsNullOrWhiteSpace(firstError))
-        {
-            _sharedFolderLastError = firstError;
-        }
         }
         finally
         {
             _suppressSharedFolderAutoApply = false;
             _sharedFolderUiOperationGate.Release();
         }
-    }
-
-    private static bool IsLikelyCredentialIssue(string message)
-    {
-        var normalized = (message ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            return false;
-        }
-
-        return normalized.Contains("Systemfehler 5", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("Systemfehler 86", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("Systemfehler 1326", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("Logon failure", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("Benutzername oder Kennwort", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("Anmeldung", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("Access is denied", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("Zugriff verweigert", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private async Task<(bool Submitted, string Username, string Password)> PromptForSharedFolderCredentialsAsync(string sharePath)
-    {
-        var usernameBox = new TextBox
-        {
-            PlaceholderText = "Benutzername (z. B. HOST\\user)",
-            Text = (_config.Credential?.Username ?? string.Empty).Trim()
-        };
-
-        var passwordBox = new PasswordBox
-        {
-            PlaceholderText = "Passwort"
-        };
-
-        var stack = new StackPanel { Spacing = 8 };
-        stack.Children.Add(new TextBlock
-        {
-            Text = $"Für die Freigabe '{sharePath}' werden Zugangsdaten benötigt.",
-            TextWrapping = TextWrapping.Wrap
-        });
-        stack.Children.Add(usernameBox);
-        stack.Children.Add(passwordBox);
-
-        var dialog = new ContentDialog
-        {
-            Title = "SMB-Anmeldung",
-            Content = stack,
-            PrimaryButtonText = "Speichern & Verbinden",
-            CloseButtonText = "Abbrechen",
-            DefaultButton = ContentDialogButton.Primary
-        };
-
-        if (Content is FrameworkElement root)
-        {
-            dialog.XamlRoot = root.XamlRoot;
-        }
-
-        var result = await dialog.ShowAsync();
-        if (result != ContentDialogResult.Primary)
-        {
-            return (false, string.Empty, string.Empty);
-        }
-
-        return (true, usernameBox.Text?.Trim() ?? string.Empty, passwordBox.Password ?? string.Empty);
-    }
-
-    private async Task ClearStoredSharedFolderCredentialsAsync()
-    {
-        var dialog = new ContentDialog
-        {
-            Title = "Gespeicherte SMB-Zugangsdaten löschen",
-            Content = new TextBlock
-            {
-                Text = "Gespeicherte Benutzername/Passwort für Shared-Folder werden entfernt. Beim nächsten Verbinden wird erneut gefragt.",
-                TextWrapping = TextWrapping.Wrap
-            },
-            PrimaryButtonText = "Löschen",
-            CloseButtonText = "Abbrechen",
-            DefaultButton = ContentDialogButton.Close
-        };
-
-        if (Content is FrameworkElement root)
-        {
-            dialog.XamlRoot = root.XamlRoot;
-        }
-
-        var result = await dialog.ShowAsync();
-        if (result != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        _config.Credential ??= new GuestCredential();
-        _config.Credential.Username = string.Empty;
-        _config.Credential.Password = string.Empty;
-        await _saveConfigAsync(_config);
-
-        _sharedFolderLastError = "-";
-        _sharedFolderStatusText.Text = "SMB-Credentials gelöscht. Beim nächsten Verbinden wird erneut gefragt.";
-        GuestLogger.Info("sharedfolders.credentials.cleared", "Gespeicherte SMB-Credentials wurden gelöscht.");
     }
 
     private string? ResolveSharedFolderHostTarget()
@@ -2114,32 +2350,31 @@ internal sealed class GuestMainWindow : Window
 
         if (!string.IsNullOrWhiteSpace(hostName))
         {
-            _sharedFolderHostDiscoveryText.Text = $"Ermittelter Hostname: {hostName}";
             _usbResolvedHostNameText.Text = $"Ermittelter Hostname: {hostName}";
             return;
         }
 
         if (!string.IsNullOrWhiteSpace(hostAddress))
         {
-            _sharedFolderHostDiscoveryText.Text = $"Kein Hostname gefunden · Fallback-Ziel: {hostAddress}";
             _usbResolvedHostNameText.Text = $"Kein Hostname gefunden · Fallback-Ziel: {hostAddress}";
             return;
         }
 
-        _sharedFolderHostDiscoveryText.Text = "Ermittelter Hostname: -";
         _usbResolvedHostNameText.Text = "Ermittelter Hostname: -";
     }
 
     private async Task SaveSharedFolderMappingsToConfigAsync()
     {
         _config.SharedFolders ??= new GuestSharedFolderSettings();
+        _config.SharedFolders.Enabled = _sharedFolderFeatureEnabledCheckBox.IsChecked == true;
+        _config.SharedFolders.BaseDriveLetter = GetSharedFolderBaseDriveLetter();
         _config.SharedFolders.Mappings = _sharedFolderMappings
             .Select(item => new GuestSharedFolderMapping
             {
                 Id = string.IsNullOrWhiteSpace(item.Id) ? Guid.NewGuid().ToString("N") : item.Id,
-                Label = string.IsNullOrWhiteSpace(item.Label) ? item.SharePath : item.Label,
+                Label = ResolveMappingLabel(item.Label, item.SharePath),
                 SharePath = item.SharePath,
-                DriveLetter = GuestConfigService.NormalizeDriveLetter(item.DriveLetter),
+                DriveLetter = _config.SharedFolders.BaseDriveLetter,
                 Persistent = true,
                 Enabled = item.Enabled
             })
@@ -2184,6 +2419,9 @@ internal sealed class GuestMainWindow : Window
     {
         error = string.Empty;
 
+        _config.SharedFolders ??= new GuestSharedFolderSettings();
+        _config.SharedFolders.BaseDriveLetter = GuestConfigService.NormalizeDriveLetter(_config.SharedFolders.BaseDriveLetter);
+
         var enabledMappings = _sharedFolderMappings.Where(mapping => mapping.Enabled).ToList();
         if (enabledMappings.Count == 0)
         {
@@ -2192,29 +2430,14 @@ internal sealed class GuestMainWindow : Window
 
         foreach (var mapping in _sharedFolderMappings)
         {
-            mapping.DriveLetter = GuestConfigService.NormalizeDriveLetter(mapping.DriveLetter);
+            mapping.DriveLetter = _config.SharedFolders.BaseDriveLetter;
             mapping.Persistent = true;
-        }
-
-        var duplicateLetters = enabledMappings
-            .Select(mapping => GuestConfigService.NormalizeDriveLetter(mapping.DriveLetter))
-            .Where(letter => !string.IsNullOrWhiteSpace(letter))
-            .GroupBy(letter => letter, StringComparer.OrdinalIgnoreCase)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key)
-            .OrderBy(static letter => letter, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (duplicateLetters.Count > 0)
-        {
-            error = $"Laufwerksbuchstaben dürfen nicht doppelt sein (aktiv): {string.Join(", ", duplicateLetters)}.";
-            return false;
         }
 
         return true;
     }
 
-    private async Task SyncSharedFoldersFromHostAsync()
+    private async Task SyncSharedFoldersFromHostAsync(bool forceHostFeatureRefresh = true)
     {
         if (!await _sharedFolderUiOperationGate.WaitAsync(TimeSpan.FromSeconds(8)))
         {
@@ -2224,6 +2447,11 @@ internal sealed class GuestMainWindow : Window
 
         try
         {
+            if (forceHostFeatureRefresh)
+            {
+                await RefreshHostFeatureAvailabilityFromSocketAsync();
+            }
+
             var hostFolders = await _fetchHostSharedFoldersAsync();
             var existingByShareName = _sharedFolderMappings
                 .Where(mapping => !string.IsNullOrWhiteSpace(mapping.SharePath))
@@ -2237,12 +2465,16 @@ internal sealed class GuestMainWindow : Window
                 .ToDictionary(group => group.Key, group => group.First().Mapping, StringComparer.OrdinalIgnoreCase);
 
             var resolvedTarget = ResolveSharedFolderHostTarget();
+            var baseDriveLetter = GetSharedFolderBaseDriveLetter();
             var synchronizedMappings = new List<GuestSharedFolderMapping>();
             var importedCount = 0;
 
             foreach (var hostFolder in hostFolders.Where(item => item.Enabled && !string.IsNullOrWhiteSpace(item.ShareName)))
             {
                 var normalizedShareName = hostFolder.ShareName.Trim();
+                var normalizedLabel = string.IsNullOrWhiteSpace(hostFolder.Label)
+                    ? normalizedShareName
+                    : hostFolder.Label.Trim();
                 var sharePath = BuildCatalogSharePath(normalizedShareName, resolvedTarget);
 
                 if (existingByShareName.TryGetValue(normalizedShareName, out var existing))
@@ -2250,9 +2482,9 @@ internal sealed class GuestMainWindow : Window
                     synchronizedMappings.Add(new GuestSharedFolderMapping
                     {
                         Id = string.IsNullOrWhiteSpace(existing.Id) ? Guid.NewGuid().ToString("N") : existing.Id,
-                        Label = string.IsNullOrWhiteSpace(existing.Label) ? normalizedShareName : existing.Label,
+                        Label = normalizedLabel,
                         SharePath = sharePath,
-                        DriveLetter = GuestConfigService.NormalizeDriveLetter(existing.DriveLetter),
+                        DriveLetter = baseDriveLetter,
                         Persistent = true,
                         Enabled = existing.Enabled,
                         MountStateDot = existing.MountStateDot,
@@ -2264,9 +2496,9 @@ internal sealed class GuestMainWindow : Window
                 synchronizedMappings.Add(new GuestSharedFolderMapping
                 {
                     Id = Guid.NewGuid().ToString("N"),
-                    Label = normalizedShareName,
+                    Label = normalizedLabel,
                     SharePath = sharePath,
-                    DriveLetter = string.Empty,
+                    DriveLetter = baseDriveLetter,
                     Persistent = true,
                     Enabled = false
                 });
@@ -2275,8 +2507,6 @@ internal sealed class GuestMainWindow : Window
             }
 
             var removedCount = Math.Max(0, _sharedFolderMappings.Count - synchronizedMappings.Count);
-
-            EnsureUniqueDriveLetters(synchronizedMappings);
 
             _suppressSharedFolderAutoApply = true;
             try
@@ -2364,6 +2594,23 @@ internal sealed class GuestMainWindow : Window
         return shareName;
     }
 
+    private static string ResolveMappingLabel(string? preferredLabel, string? sharePath)
+    {
+        var normalizedLabel = (preferredLabel ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedLabel))
+        {
+            return normalizedLabel;
+        }
+
+        var extractedShareName = ExtractShareNameFromUncPath(sharePath);
+        if (!string.IsNullOrWhiteSpace(extractedShareName))
+        {
+            return extractedShareName;
+        }
+
+        return (sharePath ?? string.Empty).Trim();
+    }
+
     private async Task RunSharedFolderSelfTestAsync()
     {
         if (!await _sharedFolderUiOperationGate.WaitAsync(TimeSpan.FromSeconds(8)))
@@ -2384,6 +2631,9 @@ internal sealed class GuestMainWindow : Window
             var enabledMappings = _sharedFolderMappings.Where(mapping => mapping.Enabled).ToList();
             var sharePresentCount = 0;
             var mappingPresentCount = 0;
+            var featureEnabled = IsSharedFolderFeatureEnabled();
+            var baseDriveLetter = GetSharedFolderBaseDriveLetter();
+            var mounted = featureEnabled && _winFspMountService.IsMounted(baseDriveLetter);
 
             foreach (var mapping in enabledMappings)
             {
@@ -2394,9 +2644,7 @@ internal sealed class GuestMainWindow : Window
                     sharePresentCount++;
                 }
 
-                var driveLetter = GuestConfigService.NormalizeDriveLetter(mapping.DriveLetter);
-                var mappingStatus = await _driveMappingService.QueryMappingAsync(driveLetter, CancellationToken.None);
-                if (mappingStatus.Exists && _driveMappingService.IsExpectedMapping(mappingStatus.RemotePath, mapping.SharePath, ResolveSharedFolderHostTarget()))
+                if (mounted)
                 {
                     mappingPresentCount++;
                 }
@@ -2438,7 +2686,11 @@ internal sealed class GuestMainWindow : Window
             CornerRadius = new CornerRadius(10),
             Padding = new Thickness(14)
         };
-        headingCard.Child = new StackPanel
+        var headingGrid = new Grid { ColumnSpacing = 10, VerticalAlignment = VerticalAlignment.Center };
+        headingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var headingStack = new StackPanel
         {
             Spacing = 4,
             Children =
@@ -2447,65 +2699,29 @@ internal sealed class GuestMainWindow : Window
                 new TextBlock { Text = "Wichtige Einstellungen übersichtlich und schnell erreichbar.", Opacity = 0.9 }
             }
         };
-        root.Children.Add(headingCard);
+        headingGrid.Children.Add(headingStack);
 
-        var topBarGrid = new Grid
-        {
-            ColumnDefinitions =
-            {
-                new ColumnDefinition { Width = GridLength.Auto },
-                new ColumnDefinition { Width = GridLength.Auto },
-                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }
-            }
-        };
-
-        var saveButton = CreateIconButton("💾", "Speichern", onClick: async (_, _) => await SaveSettingsAsync());
-        Grid.SetColumn(saveButton, 0);
-        topBarGrid.Children.Add(saveButton);
-
-        var reloadButton = CreateIconButton("⟳", "Neu laden", onClick: (_, _) =>
-        {
-            ApplyConfigToControls();
-            AppendNotification("[Info] Einstellungen aus Config neu geladen.");
-        });
-        Grid.SetColumn(reloadButton, 1);
-        topBarGrid.Children.Add(reloadButton);
-
-        var configPathWrap = new StackPanel
+        var configHeaderActions = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 6,
+            Spacing = 8,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center
         };
-        configPathWrap.Children.Add(new TextBlock
-        {
-            Text = "Aktive Config:",
-            VerticalAlignment = VerticalAlignment.Center,
-            Opacity = 0.9,
-            Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
-        });
-        configPathWrap.Children.Add(new TextBlock
-        {
-            Text = GuestConfigService.DefaultConfigPath,
-            VerticalAlignment = VerticalAlignment.Center,
-            Opacity = 0.88,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxWidth = 560
-        });
-        Grid.SetColumn(configPathWrap, 2);
-        topBarGrid.Children.Add(configPathWrap);
 
-        var topBar = new Border
+        configHeaderActions.Children.Add(CreateIconButton("💾", "Speichern", onClick: async (_, _) => await SaveSettingsAsync()));
+        configHeaderActions.Children.Add(CreateIconButton("⟳", "Neu laden", onClick: (_, _) =>
         {
-            BorderThickness = new Thickness(1),
-            BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
-            Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(14),
-            Child = topBarGrid
-        };
-        root.Children.Add(topBar);
+            ApplyConfigToControls();
+            AppendNotification("[Info] Einstellungen aus Config neu geladen.");
+        }));
+        configHeaderActions.Children.Add(CreateIconButton(ToolRestartIcon, ToolRestartLabel, onClick: async (_, _) => await RestartGuestToolAsync()));
+
+        Grid.SetColumn(configHeaderActions, 1);
+        headingGrid.Children.Add(configHeaderActions);
+
+        headingCard.Child = headingGrid;
+        root.Children.Add(headingCard);
 
         var systemSection = new Border
         {
@@ -2793,22 +3009,151 @@ internal sealed class GuestMainWindow : Window
         projectCard.Child = projectStack;
         panel.Children.Add(projectCard);
 
+        const double externalCardPadding = 10;
+        const double externalCardMinHeight = 132;
+        const double externalCardInnerRowSpacing = 4;
+        const double externalCardColumnSpacing = 10;
+
         var usbipCard = new Border
         {
             BorderThickness = new Thickness(1),
             BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
             Background = Application.Current.Resources["PageBackgroundBrush"] as Brush,
             CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(10)
+            Padding = new Thickness(externalCardPadding),
+            MinHeight = externalCardMinHeight,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
         };
 
-        var usbipStack = new StackPanel { Spacing = 4 };
-        usbipStack.Children.Add(new TextBlock { Text = "Externe USB/IP Quelle", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        usbipStack.Children.Add(new TextBlock { Text = "Quelle: vadimgrn/usbip-win2", Opacity = 0.9 });
-        usbipStack.Children.Add(new TextBlock { Text = "Nutzung in HyperTool: externer CLI-Client ohne eigene GUI-Integration.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
-        usbipStack.Children.Add(new TextBlock { Text = "Lizenz/Eigentümer: siehe Original-Repository von vadimgrn.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
-        usbipCard.Child = usbipStack;
-        panel.Children.Add(usbipCard);
+        var usbipContentGrid = new Grid
+        {
+            RowSpacing = externalCardInnerRowSpacing,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+        usbipContentGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        usbipContentGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        usbipContentGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        usbipContentGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var usbipTitleText = new TextBlock
+        {
+            Text = "Externe USB/IP Quelle",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            MinHeight = 24,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetRow(usbipTitleText, 0);
+        usbipContentGrid.Children.Add(usbipTitleText);
+
+        var usbipSourceText = new TextBlock
+        {
+            Text = "Quelle: vadimgrn/usbip-win2",
+            Opacity = 0.9,
+            MinHeight = 22,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetRow(usbipSourceText, 1);
+        usbipContentGrid.Children.Add(usbipSourceText);
+
+        var usbipUsageText = new TextBlock
+        {
+            Text = "Nutzung in HyperTool: externer CLI-Client ohne eigene GUI-Integration.",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.85
+        };
+        Grid.SetRow(usbipUsageText, 2);
+        usbipContentGrid.Children.Add(usbipUsageText);
+
+        var usbipLicenseText = new TextBlock
+        {
+            Text = "Lizenz/Eigentümer: siehe Original-Repository von vadimgrn.",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.85
+        };
+        Grid.SetRow(usbipLicenseText, 3);
+        usbipContentGrid.Children.Add(usbipLicenseText);
+
+        usbipCard.Child = usbipContentGrid;
+
+        var winfspCard = new Border
+        {
+            BorderThickness = new Thickness(1),
+            BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
+            Background = Application.Current.Resources["PageBackgroundBrush"] as Brush,
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(externalCardPadding),
+            MinHeight = externalCardMinHeight,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+
+        var winfspContentGrid = new Grid
+        {
+            RowSpacing = externalCardInnerRowSpacing,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+        winfspContentGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        winfspContentGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        winfspContentGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        winfspContentGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var winfspTitleText = new TextBlock
+        {
+            Text = "Externe Shared-Folder Runtime",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            MinHeight = 24,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetRow(winfspTitleText, 0);
+        winfspContentGrid.Children.Add(winfspTitleText);
+
+        var winfspSourceText = new TextBlock
+        {
+            Text = "Quelle: winfsp/winfsp",
+            Opacity = 0.9,
+            MinHeight = 22,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetRow(winfspSourceText, 1);
+        winfspContentGrid.Children.Add(winfspSourceText);
+
+        var winfspUsageText = new TextBlock
+        {
+            Text = "Nutzung in HyperTool: externer Runtime-Treiber für Guest Shared-Folder-Mounts.",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.85
+        };
+        Grid.SetRow(winfspUsageText, 2);
+        winfspContentGrid.Children.Add(winfspUsageText);
+
+        var winfspLicenseText = new TextBlock
+        {
+            Text = "Lizenz/Eigentümer: siehe Original-Repository von winfsp.",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.85
+        };
+        Grid.SetRow(winfspLicenseText, 3);
+        winfspContentGrid.Children.Add(winfspLicenseText);
+
+        winfspCard.Child = winfspContentGrid;
+
+        var externalSourcesGrid = new Grid
+        {
+            ColumnSpacing = externalCardColumnSpacing,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        externalSourcesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        externalSourcesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        Grid.SetColumn(usbipCard, 0);
+        externalSourcesGrid.Children.Add(usbipCard);
+        Grid.SetColumn(winfspCard, 1);
+        externalSourcesGrid.Children.Add(winfspCard);
+
+        panel.Children.Add(externalSourcesGrid);
 
         var diagnosticsCard = new Border
         {
@@ -2863,6 +3208,7 @@ internal sealed class GuestMainWindow : Window
         buttonRow.Children.Add(_installUpdateButton);
         buttonRow.Children.Add(CreateIconButton("🌐", "Changelog / Release", onClick: (_, _) => OpenReleasePage()));
         buttonRow.Children.Add(CreateIconButton("🔗", "usbip-win2 Quelle", onClick: (_, _) => OpenUsbipClientRepository()));
+        buttonRow.Children.Add(CreateIconButton("🔗", "WinFsp Quelle", onClick: (_, _) => OpenWinFspRepository()));
         panel.Children.Add(buttonRow);
 
         return new ScrollViewer { Content = panel };
@@ -2944,6 +3290,9 @@ internal sealed class GuestMainWindow : Window
         _minimizeToTrayCheckBox.IsChecked = _config.Ui.MinimizeToTray;
         _checkForUpdatesOnStartupCheckBox.IsChecked = _config.Ui.CheckForUpdatesOnStartup;
 
+        _config.FileService ??= new GuestFileServiceSettings();
+        _config.FileService.MappingMode = GuestConfigService.NormalizeMappingMode(_config.FileService.MappingMode);
+
         _suppressUsbTransportToggleEvents = true;
         try
         {
@@ -2954,16 +3303,79 @@ internal sealed class GuestMainWindow : Window
             _suppressUsbTransportToggleEvents = false;
         }
 
+        _suppressUsbFeatureToggle = true;
+        try
+        {
+            _usbFeatureEnabledCheckBox.IsChecked = _config.Usb?.Enabled != false;
+        }
+        finally
+        {
+            _suppressUsbFeatureToggle = false;
+        }
+
         UpdateUsbTransportModePresentation();
         UpdateHostDiscoveryPresentation();
         UpdateAutoConnectToggleFromSelection();
+        UpdateUsbRuntimeStatusUi();
 
         RefreshSharedFolderMappingsFromConfig();
+        UpdateSharedFolderFeatureUi();
         if (_sharedFoldersPage is not null)
         {
             _sharedFolderMappingsListView.ItemsSource = null;
             _sharedFolderMappingsListView.ItemsSource = _sharedFolderMappings;
             _ = RefreshSharedFolderMountStatesSafeAsync();
+        }
+    }
+
+    public void UpdateHostFeatureAvailability(bool usbFeatureEnabledByHost, bool sharedFoldersFeatureEnabledByHost, string? hostName)
+    {
+        var previousUsbFeatureEnabledByHost = IsUsbFeatureEnabledByHost();
+        var previousSharedFolderFeatureEnabledByHost = IsSharedFolderFeatureEnabledByHost();
+
+        _config.Usb ??= new GuestUsbSettings();
+        _config.SharedFolders ??= new GuestSharedFolderSettings();
+
+        _config.Usb.HostFeatureEnabled = usbFeatureEnabledByHost;
+        _config.SharedFolders.HostFeatureEnabled = sharedFoldersFeatureEnabledByHost;
+
+        if (!string.IsNullOrWhiteSpace(hostName))
+        {
+            _config.Usb.HostName = hostName.Trim();
+            _config.Usb.HostAddress = hostName.Trim();
+        }
+
+        UpdateHostDiscoveryPresentation();
+        UpdateUsbRuntimeStatusUi();
+        UpdateSharedFolderFeatureUi();
+
+        if (!usbFeatureEnabledByHost)
+        {
+            _usbHostFeatureReactivationPending = false;
+        }
+        else if (!previousUsbFeatureEnabledByHost)
+        {
+            var token = ++_usbHostFeatureReactivationToken;
+            _usbHostFeatureReactivationPending = true;
+            UpdateUsbRuntimeStatusUi();
+            _ = CompleteUsbHostFeatureReactivationAsync(token);
+        }
+
+        if (!sharedFoldersFeatureEnabledByHost)
+        {
+            _sharedFolderHostFeatureReactivationPending = false;
+        }
+        else if (!previousSharedFolderFeatureEnabledByHost)
+        {
+            var token = ++_sharedFolderHostFeatureReactivationToken;
+            _sharedFolderHostFeatureReactivationPending = true;
+            UpdateSharedFolderFeatureUi();
+            _ = CompleteSharedFolderHostFeatureReactivationAsync(token);
+        }
+
+        if (!sharedFoldersFeatureEnabledByHost)
+        {
+            ScheduleSharedFolderAutoApply();
         }
     }
 
@@ -2975,8 +3387,13 @@ internal sealed class GuestMainWindow : Window
         _config.Ui.MinimizeToTray = _minimizeToTrayCheckBox.IsChecked == true;
         _config.Ui.CheckForUpdatesOnStartup = _checkForUpdatesOnStartupCheckBox.IsChecked != false;
         _config.Usb ??= new GuestUsbSettings();
+        _config.Usb.Enabled = _usbFeatureEnabledCheckBox.IsChecked != false;
         _config.Usb.UseHyperVSocket = _useHyperVSocketCheckBox.IsChecked != false;
         _config.Usb.HostAddress = (_usbHostAddressTextBox.Text ?? string.Empty).Trim();
+
+        _config.FileService ??= new GuestFileServiceSettings();
+        _config.FileService.Enabled = true;
+        _config.FileService.MappingMode = GuestConfigService.NormalizeMappingMode(_config.FileService.MappingMode);
 
         await _saveConfigAsync(_config);
         ApplyTheme(_config.Ui.Theme);
@@ -3219,6 +3636,12 @@ internal sealed class GuestMainWindow : Window
             Brush(0xFF, 0x6B, 0x3A, 0x0A));
     }
 
+    private (Brush chipBackground, Brush chipBorder, Brush textForeground) ResolveHostFeatureChipPalette(bool isActive)
+    {
+        var palette = ResolveUsbModePalette(forHyperV: true, isActive: isActive);
+        return (palette.chipBackground, palette.chipBorder, palette.textForeground);
+    }
+
     private static string BuildAutoConnectKey(UsbIpDeviceInfo device)
     {
         if (!string.IsNullOrWhiteSpace(device.HardwareId))
@@ -3248,7 +3671,7 @@ internal sealed class GuestMainWindow : Window
         _suppressUsbAutoConnectToggleEvents = true;
         try
         {
-            _usbAutoConnectCheckBox.IsEnabled = _isUsbClientAvailable && selected is not null;
+            _usbAutoConnectCheckBox.IsEnabled = IsUsbFeatureUsable() && selected is not null;
             _usbAutoConnectCheckBox.IsChecked = selected is not null
                 && !string.IsNullOrWhiteSpace(key)
                 && keys.Contains(key, StringComparer.OrdinalIgnoreCase);
@@ -3356,6 +3779,20 @@ internal sealed class GuestMainWindow : Window
 
     private async Task RefreshUsbAsync()
     {
+        await RefreshHostFeatureAvailabilityFromSocketAsync();
+
+        if (!IsUsbFeatureLocallyEnabled())
+        {
+            AppendNotification("[Info] USB Connect ist lokal deaktiviert.");
+            return;
+        }
+
+        if (!IsUsbFeatureEnabledByHost())
+        {
+            AppendNotification("[Info] USB Connect ist durch den Host deaktiviert.");
+            return;
+        }
+
         try
         {
             var list = await _refreshUsbDevicesAsync();
@@ -3451,6 +3888,18 @@ internal sealed class GuestMainWindow : Window
 
     private async Task ConnectUsbAsync()
     {
+        if (!IsUsbFeatureLocallyEnabled())
+        {
+            AppendNotification("[Warn] USB Connect ist lokal deaktiviert.");
+            return;
+        }
+
+        if (!IsUsbFeatureEnabledByHost())
+        {
+            AppendNotification("[Warn] USB Connect ist durch den Host deaktiviert.");
+            return;
+        }
+
         var selected = GetSelectedUsbDevice();
         if (selected is null)
         {
@@ -3468,6 +3917,18 @@ internal sealed class GuestMainWindow : Window
 
     private async Task DisconnectUsbAsync()
     {
+        if (!IsUsbFeatureLocallyEnabled())
+        {
+            AppendNotification("[Warn] USB Connect ist lokal deaktiviert.");
+            return;
+        }
+
+        if (!IsUsbFeatureEnabledByHost())
+        {
+            AppendNotification("[Warn] USB Connect ist durch den Host deaktiviert.");
+            return;
+        }
+
         var selected = GetSelectedUsbDevice();
         if (selected is null)
         {
@@ -3604,6 +4065,15 @@ internal sealed class GuestMainWindow : Window
         });
     }
 
+    private void OpenWinFspRepository()
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = $"https://github.com/{WinFspRuntimeOwner}/{WinFspRuntimeRepo}",
+            UseShellExecute = true
+        });
+    }
+
     private async Task InstallGuestUsbRuntimeAsync()
     {
         if (_usbRuntimeInstallButton is not null)
@@ -3669,6 +4139,90 @@ internal sealed class GuestMainWindow : Window
             if (_usbRuntimeInstallButton is not null)
             {
                 _usbRuntimeInstallButton.IsEnabled = true;
+            }
+        }
+    }
+
+    private async Task InstallGuestWinFspRuntimeAsync()
+    {
+        if (_winFspRuntimeInstallButton is not null)
+        {
+            _winFspRuntimeInstallButton.IsEnabled = false;
+        }
+
+        try
+        {
+            AppendNotification("[Info] WinFsp Installer wird vorbereitet...");
+
+            var installerResult = await _updateService.CheckForUpdateAsync(
+                WinFspRuntimeOwner,
+                WinFspRuntimeRepo,
+                "0.0.0",
+                CancellationToken.None,
+                WinFspRuntimeAssetHint);
+
+            if (!installerResult.Success || string.IsNullOrWhiteSpace(installerResult.InstallerDownloadUrl))
+            {
+                AppendNotification("[Warn] WinFsp Installer konnte nicht automatisch ermittelt werden. Release-Seite wird geöffnet.");
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "https://github.com/winfsp/winfsp/releases/latest",
+                    UseShellExecute = true
+                });
+                return;
+            }
+
+            var targetDirectory = IOPath.Combine(IOPath.GetTempPath(), "HyperTool", "runtime-installers");
+            Directory.CreateDirectory(targetDirectory);
+
+            var fileName = ResolveInstallerFileName(
+                installerResult.InstallerDownloadUrl,
+                installerResult.InstallerFileName,
+                "winfsp-x64.msi");
+
+            var installerPath = IOPath.Combine(targetDirectory, fileName);
+
+            AppendNotification($"[Info] Lade WinFsp herunter: {fileName}");
+            using (var response = await UpdateDownloadClient.GetAsync(installerResult.InstallerDownloadUrl, CancellationToken.None))
+            {
+                response.EnsureSuccessStatusCode();
+                await using var stream = new FileStream(installerPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await response.Content.CopyToAsync(stream);
+            }
+
+            var extension = IOPath.GetExtension(installerPath);
+            if (string.Equals(extension, ".msi", StringComparison.OrdinalIgnoreCase))
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "msiexec.exe",
+                    Arguments = $"/i \"{installerPath}\" /passive",
+                    UseShellExecute = true,
+                    Verb = "runas"
+                });
+            }
+            else
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = installerPath,
+                    UseShellExecute = true,
+                    Verb = "runas"
+                });
+            }
+
+            AppendNotification("[Success] WinFsp Installer gestartet. Nach Abschluss HyperTool Guest neu starten.");
+        }
+        catch (Exception ex)
+        {
+            AppendNotification($"[Error] Automatische WinFsp Installation fehlgeschlagen: {ex.Message}");
+        }
+        finally
+        {
+            UpdateWinFspRuntimeStatusUi();
+            if (_winFspRuntimeInstallButton is not null)
+            {
+                _winFspRuntimeInstallButton.IsEnabled = true;
             }
         }
     }
@@ -3806,18 +4360,203 @@ internal sealed class GuestMainWindow : Window
 
     private void UpdateUsbRuntimeStatusUi()
     {
+        var hostEnabled = IsUsbFeatureEnabledByHost();
+        var localEnabled = IsUsbFeatureLocallyEnabled();
         var isAvailable = _isUsbClientAvailable;
+
+        if (!isAvailable && localEnabled)
+        {
+            _config.Usb ??= new GuestUsbSettings();
+            _config.Usb.Enabled = false;
+            localEnabled = false;
+            _ = SaveConfigQuietlyAsync();
+        }
+
+        var featureUsable = IsUsbFeatureUsable() && !_usbHostFeatureReactivationPending;
+        var refreshAvailable = IsUsbRefreshAvailable();
+
         _usbRuntimeStatusDot.Fill = new SolidColorBrush(isAvailable
             ? Windows.UI.Color.FromArgb(0xFF, 0x32, 0xD7, 0x4B)
             : Windows.UI.Color.FromArgb(0xFF, 0xE8, 0x4A, 0x5F));
-        _usbRuntimeStatusText.Text = isAvailable
-            ? "USB/IP-Client: Verfügbar"
-            : "USB/IP-Client: Nicht installiert";
+        _usbRuntimeStatusText.Text = !isAvailable
+            ? "USB/IP-Client: Nicht installiert"
+            : (!localEnabled
+                ? "USB-Connect: lokal deaktiviert"
+                : (!hostEnabled
+                    ? "USB-Connect: durch Host deaktiviert"
+                    : "USB/IP-Client: Verfügbar"));
+
+        _usbDisabledOverlayText.Visibility = featureUsable ? Visibility.Collapsed : Visibility.Visible;
+
+        var usbEffectiveEnabled = IsUsbFeatureUsable();
+        var usbChipPalette = ResolveHostFeatureChipPalette(usbEffectiveEnabled);
+        _usbHostFeatureStatusChip.Background = usbChipPalette.chipBackground;
+        _usbHostFeatureStatusChip.BorderBrush = usbChipPalette.chipBorder;
+        _usbHostFeatureStatusChipText.Text = usbEffectiveEnabled ? "Aktiv" : "Inaktiv";
+        _usbHostFeatureStatusChipText.Foreground = usbChipPalette.textForeground;
+
+        _usbFeatureEnabledCheckBox.IsEnabled = hostEnabled && isAvailable;
 
         if (_usbRuntimeInstallButton is not null)
         {
-            _usbRuntimeInstallButton.Visibility = isAvailable ? Visibility.Collapsed : Visibility.Visible;
+            _usbRuntimeInstallButton.Visibility = !isAvailable ? Visibility.Visible : Visibility.Collapsed;
+            _usbRuntimeInstallButton.IsEnabled = true;
         }
+
+        if (_usbRuntimeRestartButton is not null)
+        {
+            _usbRuntimeRestartButton.Visibility = !isAvailable ? Visibility.Visible : Visibility.Collapsed;
+            _usbRuntimeRestartButton.IsEnabled = true;
+        }
+
+        if (_usbRefreshButton is not null)
+        {
+            _usbRefreshButton.IsEnabled = refreshAvailable;
+        }
+
+        if (_usbConnectButton is not null)
+        {
+            _usbConnectButton.IsEnabled = featureUsable;
+        }
+
+        if (_usbDisconnectButton is not null)
+        {
+            _usbDisconnectButton.IsEnabled = featureUsable;
+        }
+
+        _usbAutoConnectCheckBox.IsEnabled = featureUsable;
+    }
+
+    private async Task CompleteUsbHostFeatureReactivationAsync(int token)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            if (token != _usbHostFeatureReactivationToken || !IsUsbFeatureEnabledByHost())
+            {
+                return;
+            }
+
+            await RefreshUsbAsync();
+        }
+        finally
+        {
+            if (token == _usbHostFeatureReactivationToken)
+            {
+                _usbHostFeatureReactivationPending = false;
+                UpdateUsbRuntimeStatusUi();
+            }
+        }
+    }
+
+    private async Task CompleteSharedFolderHostFeatureReactivationAsync(int token)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            if (token != _sharedFolderHostFeatureReactivationToken || !IsSharedFolderFeatureEnabledByHost())
+            {
+                return;
+            }
+
+            await SyncSharedFoldersFromHostAsync();
+            await RefreshSharedFolderMountStatesSafeAsync();
+        }
+        finally
+        {
+            if (token == _sharedFolderHostFeatureReactivationToken)
+            {
+                _sharedFolderHostFeatureReactivationPending = false;
+                UpdateSharedFolderFeatureUi();
+            }
+        }
+    }
+
+    private async Task RefreshHostFeatureAvailabilityFromSocketAsync()
+    {
+        try
+        {
+            var identity = await new HyperVSocketHostIdentityGuestClient().FetchHostIdentityAsync(CancellationToken.None);
+            if (identity is null)
+            {
+                return;
+            }
+
+            UpdateHostFeatureAvailability(
+                usbFeatureEnabledByHost: identity.Features?.UsbSharingEnabled != false,
+                sharedFoldersFeatureEnabledByHost: identity.Features?.SharedFoldersEnabled != false,
+                hostName: identity.HostName);
+        }
+        catch
+        {
+        }
+    }
+
+    private void UpdateWinFspRuntimeStatusUi()
+    {
+        var isAvailable = IsWinFspRuntimeInstalled();
+        _winFspRuntimeStatusDot.Fill = new SolidColorBrush(isAvailable
+            ? Windows.UI.Color.FromArgb(0xFF, 0x32, 0xD7, 0x4B)
+            : Windows.UI.Color.FromArgb(0xFF, 0xE8, 0x4A, 0x5F));
+        _winFspRuntimeStatusText.Text = isAvailable
+            ? "WinFsp Runtime: Verfügbar"
+            : "WinFsp Runtime: Nicht installiert";
+
+        if (_winFspRuntimeInstallButton is not null)
+        {
+            _winFspRuntimeInstallButton.Visibility = isAvailable ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        if (_winFspRuntimeRestartButton is not null)
+        {
+            _winFspRuntimeRestartButton.Visibility = isAvailable ? Visibility.Collapsed : Visibility.Visible;
+        }
+    }
+
+    private async Task RestartGuestToolAsync()
+    {
+        try
+        {
+            var currentTheme = GuestConfigService.NormalizeTheme((_themeCombo.SelectedItem as string) ?? _config.Ui.Theme);
+            AppendNotification("[Info] Tool wird neu geladen …");
+            await _restartForThemeChangeAsync(currentTheme);
+        }
+        catch (Exception ex)
+        {
+            AppendNotification($"[Error] Neustart fehlgeschlagen: {ex.Message}");
+        }
+    }
+
+    private static bool IsWinFspRuntimeInstalled()
+    {
+        try
+        {
+            var installDir = Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\WinFsp", "InstallDir", null) as string;
+            if (!string.IsNullOrWhiteSpace(installDir)
+                && File.Exists(IOPath.Combine(installDir, "bin", "winfsp-x64.dll")))
+            {
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        if (!string.IsNullOrWhiteSpace(programFiles)
+            && File.Exists(IOPath.Combine(programFiles, "WinFsp", "bin", "winfsp-x64.dll")))
+        {
+            return true;
+        }
+
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        if (!string.IsNullOrWhiteSpace(programFilesX86)
+            && File.Exists(IOPath.Combine(programFilesX86, "WinFsp", "bin", "winfsp-x64.dll")))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static string ResolveInstallerFileName(string downloadUrl, string? fileName, string defaultFileName = "HyperTool-Guest-Setup.exe")
@@ -3844,6 +4583,17 @@ internal sealed class GuestMainWindow : Window
         if (!DispatcherQueue.TryEnqueue(() => AppendNotification(message)))
         {
             AppendNotification(message);
+        }
+    }
+
+    private async Task SaveConfigQuietlyAsync()
+    {
+        try
+        {
+            await _saveConfigAsync(_config);
+        }
+        catch
+        {
         }
     }
 

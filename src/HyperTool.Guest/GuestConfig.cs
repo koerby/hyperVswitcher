@@ -31,14 +31,29 @@ internal sealed class GuestConfig
 
     public GuestSharedFolderSettings SharedFolders { get; set; } = new();
 
+    public GuestFileServiceSettings FileService { get; set; } = new();
+
     public GuestUiSettings Ui { get; set; } = new();
+}
+
+internal sealed class GuestFileServiceSettings
+{
+    public bool Enabled { get; set; } = true;
+
+    public string MappingMode { get; set; } = "hypertool-file";
+
+    public bool PreferHyperVSocket { get; set; } = true;
 }
 
 internal sealed class GuestUsbSettings
 {
+    public bool Enabled { get; set; } = true;
+
     public string HostAddress { get; set; } = string.Empty;
 
     public string HostName { get; set; } = string.Empty;
+
+    public bool HostFeatureEnabled { get; set; } = true;
 
     public bool UseHyperVSocket { get; set; } = true;
 
@@ -49,6 +64,10 @@ internal sealed class GuestUsbSettings
 
 internal sealed class GuestSharedFolderSettings
 {
+    public bool Enabled { get; set; } = true;
+
+    public bool HostFeatureEnabled { get; set; } = true;
+
     public string BaseDriveLetter { get; set; } = "Z";
 
     public List<GuestSharedFolderMapping> Mappings { get; set; } = [];
@@ -302,6 +321,9 @@ internal static class GuestConfigService
             });
         }
 
+        config.FileService ??= new GuestFileServiceSettings();
+        config.FileService.MappingMode = NormalizeMappingMode(config.FileService.MappingMode);
+
         config.Ui ??= new GuestUiSettings();
         config.Ui.Theme = NormalizeTheme(config.Ui.Theme);
     }
@@ -427,5 +449,10 @@ internal static class GuestConfigService
         return normalized is "light" or "dark"
             ? normalized
             : "dark";
+    }
+
+    public static string NormalizeMappingMode(string? mode)
+    {
+        return "hypertool-file";
     }
 }

@@ -70,10 +70,10 @@ public sealed class HelpWindow : Window
         bodyStack.Children.Add(CreateSection("VM Auswahl", "Im Header siehst du alle Hyper-V VMs. Ein Klick auf einen Chip setzt die aktive Arbeits-VM."));
         bodyStack.Children.Add(CreateSection("VM Aktionen", "Start, Stop, Hard Off, Restart und Konsole stehen als Schnellaktionen bereit (inkl. Tray-Aktionen)."));
         bodyStack.Children.Add(CreateSection("Netzwerk", "Switches werden pro VM-Adapter verwaltet. Über Host-Netzwerk öffnest du die Adapter-Detailansicht mit Status-Chips (Gateway/Default Switch)."));
-        bodyStack.Children.Add(CreateSection("USB Host", "USB-Geräte können aktualisiert, freigegeben und entfernt werden. Verbundene Guest-VMs werden im USB-Status sichtbar."));
-        bodyStack.Children.Add(CreateSection("USB Tray Control Center", "Der USB-Bereich bietet Schnellaktionen (Refresh/Share/Unshare) und bei fehlendem usbipd-win einen Installationsbutton mit automatischem Download und Installer-Start. Der Runtime-Status wird im USB-Menü der Haupt-App angezeigt."));
+        bodyStack.Children.Add(CreateSection("USB Host", "USB Share zeigt oben rechts einen Aktiv/Inaktiv-Status-Chip. Bei deaktiviertem Feature erscheint im Tabellenbereich ein zentrierter Hinweis 'Deaktiviert'; nach Reaktivierung wird nach ca. 1 Sekunde automatisch aktualisiert."));
+        bodyStack.Children.Add(CreateSection("Shared Folder Host", "Shared Folder nutzt ebenfalls einen Aktiv/Inaktiv-Status-Chip oben rechts. Bei deaktiviertem Feature wird der Katalog mit dem Overlay 'Deaktiviert' markiert; nach Aktivierung erfolgt eine automatische Aktualisierung."));
         bodyStack.Children.Add(CreateSection("Tray Klickverhalten", "Linksklick und Rechtsklick auf das Tasktray-Icon öffnen das Control Center."));
-        bodyStack.Children.Add(CreateSection("Config / Info", "Konfiguration speichern, Update-Status prüfen und kompakte Diagnose-/Versionsinfos einsehen."));
+        bodyStack.Children.Add(CreateSection("Config / Info", "Konfiguration speichern, neu laden und die App über 'Tool neu starten' mit kurzem Reload-Screen neu laden. Zusätzlich: Update-Status und Diagnose-/Versionsinfos."));
         bodyStack.Children.Add(CreateSection("Logs", "'Logs öffnen' öffnet immer den Log-Ordner (nicht einzelne Dateien)."));
         bodyCard.Child = new ScrollViewer
         {

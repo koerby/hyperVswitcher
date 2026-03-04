@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using HyperTool.Models;
 
 namespace HyperTool.Services;
 
@@ -17,6 +18,7 @@ public sealed class HyperVSocketHostIdentityGuestClient
     {
         public string HostName { get; set; } = string.Empty;
         public string Fqdn { get; set; } = string.Empty;
+        public HostFeatureAvailability? Features { get; set; }
     }
 
     public HyperVSocketHostIdentityGuestClient(Guid? serviceId = null)
@@ -25,6 +27,27 @@ public sealed class HyperVSocketHostIdentityGuestClient
     }
 
     public async Task<string?> FetchHostNameAsync(CancellationToken cancellationToken)
+    {
+        var identity = await FetchHostIdentityAsync(cancellationToken);
+        if (identity is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(identity.HostName))
+        {
+            return identity.HostName.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(identity.Fqdn))
+        {
+            return identity.Fqdn.Trim();
+        }
+
+        return null;
+    }
+
+    public async Task<HostIdentityInfo?> FetchHostIdentityAsync(CancellationToken cancellationToken)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         linkedCts.CancelAfter(TimeSpan.FromMilliseconds(2000));
@@ -43,16 +66,23 @@ public sealed class HyperVSocketHostIdentityGuestClient
         }
 
         var payload = JsonSerializer.Deserialize<HostIdentityPayload>(payloadText, SerializerOptions);
-        if (!string.IsNullOrWhiteSpace(payload?.HostName))
+        if (payload is null)
         {
-            return payload.HostName.Trim();
+            return null;
         }
 
-        if (!string.IsNullOrWhiteSpace(payload?.Fqdn))
+        var hostName = payload.HostName?.Trim() ?? string.Empty;
+        var fqdn = payload.Fqdn?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(hostName) && string.IsNullOrWhiteSpace(fqdn))
         {
-            return payload.Fqdn.Trim();
+            return null;
         }
 
-        return null;
+        return new HostIdentityInfo
+        {
+            HostName = hostName,
+            Fqdn = fqdn,
+            Features = payload.Features ?? new HostFeatureAvailability()
+        };
     }
 }

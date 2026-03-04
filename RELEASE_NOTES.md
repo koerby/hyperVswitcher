@@ -1,5 +1,75 @@
 # HyperTool Release Notes
 
+## v2.3.5
+
+### Highlights
+
+- Shared Folder wurde vollständig in Host und Guest integriert (Katalog, Mapping, Runtime-Status, Diagnose, UI-Gating).
+- Host/Guest-Runtime-UX ist jetzt durchgängig konsistent: Status, Installationsbuttons, Neustart-Buttons und Reload-basierter Tool-Neustart.
+- Guest-Info und Hilfe wurden inhaltlich erweitert (inkl. WinFsp als externe Quelle) und visuell präzisiert.
+
+### Neu
+
+- Shared Folder (Host/Guest):
+	- Host verwaltet Freigaben zentral, Guest mappt über `hypertool-file`.
+	- Guest nutzt WinFsp als Mount-Runtime; fehlende Runtime wird explizit angezeigt.
+	- Host-/Guest-Feature-Gating für Shared Folder inkl. klarer Aktiv/Inaktiv-Status und Overlay-Hinweise.
+- Info/Hilfe Guest:
+	- Neue externe Quelle `winfsp/winfsp` im Info-Menü inkl. direktem Quellen-Link.
+	- Externe Quellenkarten (`usbip-win2`, `winfsp`) nebeneinander im 50/50-Layout.
+	- Kartenlayout mit identischer Mindesthöhe und abgestimmter vertikaler Ausrichtung.
+- Config UX:
+	- `Tool neu starten` zusätzlich in Host- und Guest-Config-Headern neben `Speichern` und `Neu laden`.
+
+### Verbessert
+
+- Neustartverhalten:
+	- Host-`Tool neu starten` entspricht jetzt exakt dem Theme-Wechsel-Ablauf (kurzer Reload-Screen, danach Reopen).
+	- Guest-`Tool neu starten` nutzt denselben Reload-Flow über den bestehenden Theme-Reopen-Mechanismus.
+	- Einheitliches Icon/Label-Schema für alle `Tool neu starten` Buttons.
+- Runtime-Status/UI:
+	- Installations-/Neustart-Buttons werden bei erfüllten Runtime-Abhängigkeiten automatisch ausgeblendet.
+	- Guest-Status priorisiert fehlenden USB-Client klar als „Nicht installiert“.
+	- Guest-Fensterhöhe moderat reduziert für die 4-Menü-Struktur (USB, Share, Einstellungen, Info), ohne Layout-Bruch.
+- Installer/Uninstaller:
+	- Optionale Runtime-Deinstallation robuster durch Registry-basierte Erkennung und Fallback-Uninstall-Aufrufe.
+	- Host/Guest-Installertexte und Defaults konsolidiert; Startverhalten nach Installation präzisiert.
+
+### Doku / Lizenz / Cleanup
+
+- README auf `v2.3.5` aktualisiert (Features, Build-Beispiele, Runtime-/Lizenzhinweise).
+- LICENSE um Third-Party-Runtime-Notice (`usbipd-win`, `usbip-win2`, `winfsp`) ergänzt und präzisiert.
+- Hilfe-Texte in Host/Guest um Shared-Folder-/WinFsp-/Tool-Neustart-Kontext erweitert.
+
+## v2.1.7
+
+### Highlights
+
+- Host und Guest nutzen jetzt konsistenten `Tool neu starten`-Flow mit kurzem Reload-Screen (analog Theme-Wechsel).
+- Config-Bereiche in Host und Guest wurden um `Tool neu starten` ergänzt (neben `Speichern` / `Neu laden`).
+- Guest-Info dokumentiert nun zusätzlich die externe Shared-Folder-Runtime `WinFsp` inkl. direktem Quellen-Link.
+
+### Neu
+
+- Guest Info:
+	- Neue Karte `Externe Shared-Folder Runtime` mit Quelle `winfsp/winfsp`.
+	- Neuer Button `WinFsp Quelle` im Info-Aktionsbereich.
+- UI Konsistenz:
+	- Einheitliches Icon/Label-Schema für alle `Tool neu starten` Buttons in Host und Guest.
+
+### Verbessert
+
+- Hilfe Host:
+	- Config/Info-Beschreibung enthält jetzt den Reload-basierten `Tool neu starten` Ablauf.
+- Hilfe Guest:
+	- Shared-Folder-Hinweis enthält explizit die WinFsp-Abhängigkeit.
+	- Einstellungs-Hinweis ergänzt um `Tool neu starten` mit Reload-Screen.
+
+### Doku / Lizenzhinweise
+
+- README um WinFsp-Abhängigkeit und konsolidierte Drittanbieter-/Lizenzhinweise erweitert.
+- Lizenzdatei um klare Hinweise zu externen Runtimes (`usbipd-win`, `usbip-win2`, `winfsp`) ergänzt.
+
 ## v2.1.6
 
 ### Highlights

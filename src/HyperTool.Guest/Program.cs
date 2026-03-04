@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using HyperTool.Services;
 
 namespace HyperTool.Guest;
 
@@ -6,6 +7,8 @@ internal static class GuestCli
 {
     public static async Task<int> ExecuteAsync(string[] args)
     {
+        _winFspMountService ??= new GuestWinFspMountService();
+
         var configPath = ResolveConfigPath(args);
         var command = ResolveCommand(args);
 
@@ -65,6 +68,14 @@ internal static class GuestCli
             GuestHandshakeWriter.TryWrite(config, handshakeState);
             return 1;
         }
+        finally
+        {
+            if (command is "once" or "status" or "unmap" or "handshake")
+            {
+                _winFspMountService?.Dispose();
+                _winFspMountService = null;
+            }
+        }
     }
 
     private static string ResolveCommand(string[] args)
@@ -103,6 +114,8 @@ internal static class GuestCli
         string driveLetter,
         GuestHandshakeState handshakeState)
     {
+        _activeConfig = config;
+
         if (command is "install-autostart" or "remove-autostart" or "autostart-status")
         {
             return await ExecuteAutostartCommandAsync(command, args, config, configPath, handshakeState);
@@ -124,7 +137,7 @@ internal static class GuestCli
         {
             "status" => await PrintStatusAsync(driveLetter),
             "once" => await EnsureMappedAsync(config, driveLetter),
-            "unmap" => await UnmapDriveAsync(driveLetter),
+            "unmap" => await UnmapDriveAsync(config, driveLetter),
             "run" => await RunLoopAsync(config, driveLetter, handshakeState),
             "handshake" => await WriteHandshakeNowAsync(config, driveLetter, handshakeState),
             _ => UnknownCommand(command)
@@ -248,15 +261,43 @@ internal static class GuestCli
 
     private static async Task<int> PrintStatusAsync(string driveLetter)
     {
-        var status = await QueryDriveMappingAsync(driveLetter);
-        if (!status.Exists)
+        if (_activeConfig is null)
         {
-            GuestLogger.Info("mapping.status", $"{driveLetter}: nicht verbunden.");
-            return 0;
+            GuestLogger.Error("mapping.status", "Konfiguration nicht geladen.");
+            return 1;
         }
 
-        GuestLogger.Info("mapping.status", $"{driveLetter}: verbunden.", new { status.RemotePath });
-        return 0;
+        try
+        {
+            var mapping = new GuestSharedFolderMapping
+            {
+                SharePath = _activeConfig.SharePath,
+                DriveLetter = driveLetter,
+                Enabled = true,
+                Persistent = true,
+                Label = "CLI"
+            };
+
+            await (_winFspMountService ??= new GuestWinFspMountService()).EnsureMountedAsync(mapping, CancellationToken.None);
+            GuestLogger.Info("mapping.status", "HyperTool-File-Modus aktiv und erreichbar.", new
+            {
+                mode = "hypertool-file",
+                driveLetter,
+                sharePath = _activeConfig.SharePath
+            });
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            GuestLogger.Error("mapping.status", "HyperTool-File-Modus nicht erreichbar.", new
+            {
+                mode = "hypertool-file",
+                driveLetter,
+                sharePath = _activeConfig.SharePath,
+                error = ex.Message
+            });
+            return 1;
+        }
     }
 
     private static async Task<int> WriteHandshakeNowAsync(GuestConfig config, string driveLetter, GuestHandshakeState handshakeState)
@@ -269,180 +310,70 @@ internal static class GuestCli
 
     private static async Task<int> EnsureMappedAsync(GuestConfig config, string driveLetter)
     {
-        var targetPath = ResolveEffectiveSharePath(config);
-        var mapping = await QueryDriveMappingAsync(driveLetter);
+        _activeConfig = config;
 
-        if (mapping.Exists
-            && string.Equals(NormalizeUnc(mapping.RemotePath), NormalizeUnc(targetPath), StringComparison.OrdinalIgnoreCase))
+        try
         {
-            GuestLogger.Info("mapping.ok", $"{driveLetter}: bereits korrekt gemappt.", new { targetPath });
-            return 0;
-        }
-
-        if (mapping.Exists)
-        {
-            GuestLogger.Warn("mapping.repair", $"{driveLetter}: Mapping wird ersetzt.", new { current = mapping.RemotePath, targetPath });
-            var unmapCode = await RunProcessAsync("net", $"use {driveLetter}: /delete /y");
-            if (unmapCode != 0)
+            var fileModeMapping = new GuestSharedFolderMapping
             {
-                GuestLogger.Error("mapping.unmap_failed", "Bestehendes Mapping konnte nicht entfernt werden.", new { unmapCode });
-                return 1;
-            }
-        }
+                SharePath = config.SharePath,
+                DriveLetter = driveLetter,
+                Enabled = true,
+                Persistent = true,
+                Label = "CLI"
+            };
 
-        var persistentText = config.Persistent ? "yes" : "no";
-        var mapArgs = string.IsNullOrWhiteSpace(config.Credential.Username)
-            ? $"use {driveLetter}: \"{targetPath}\" /persistent:{persistentText}"
-            : $"use {driveLetter}: \"{targetPath}\" \"{config.Credential.Password}\" /user:\"{config.Credential.Username}\" /persistent:{persistentText}";
-
-        GuestLogger.Info("mapping.start", "Laufwerk wird gemappt.", new { driveLetter, targetPath, config.Persistent });
-        var mapCode = await RunProcessAsync("net", mapArgs);
-        if (mapCode != 0)
-        {
-            GuestLogger.Error("mapping.failed", "Mapping fehlgeschlagen.", new { mapCode, driveLetter, targetPath });
-            return 1;
-        }
-
-        GuestLogger.Info("mapping.success", "Mapping erfolgreich.", new { driveLetter, targetPath });
-        return 0;
-    }
-
-    private static string ResolveEffectiveSharePath(GuestConfig config)
-    {
-        var sharePath = (config.SharePath ?? string.Empty).Trim();
-        if (!sharePath.StartsWith("\\\\", StringComparison.Ordinal))
-        {
-            return sharePath;
-        }
-
-        var hostAddress = (config.Usb?.HostAddress ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(hostAddress))
-        {
-            return sharePath;
-        }
-
-        var withoutPrefix = sharePath[2..];
-        var separatorIndex = withoutPrefix.IndexOf('\\');
-        if (separatorIndex <= 0)
-        {
-            return sharePath;
-        }
-
-        var uncHost = withoutPrefix[..separatorIndex];
-        if (!string.Equals(uncHost, "HOST", StringComparison.OrdinalIgnoreCase))
-        {
-            return sharePath;
-        }
-
-        var suffix = withoutPrefix[separatorIndex..];
-        var resolved = $"\\\\{hostAddress}{suffix}";
-
-        GuestLogger.Info("mapping.sharepath.resolve", "SharePath-Hostplatzhalter aufgelöst.", new
-        {
-            configuredSharePath = sharePath,
-            resolvedSharePath = resolved,
-            hostAddress
-        });
-
-        return resolved;
-    }
-
-    private static async Task<int> UnmapDriveAsync(string driveLetter)
-    {
-        var mapping = await QueryDriveMappingAsync(driveLetter);
-        if (!mapping.Exists)
-        {
-            GuestLogger.Info("unmap.noop", $"{driveLetter}: bereits nicht verbunden.");
+            await (_winFspMountService ??= new GuestWinFspMountService()).EnsureMountedAsync(fileModeMapping, CancellationToken.None);
+            GuestLogger.Info("mapping.success", "HyperTool-File-Modus bereit.", new
+            {
+                mode = "hypertool-file",
+                driveLetter,
+                sharePath = config.SharePath
+            });
             return 0;
         }
-
-        var code = await RunProcessAsync("net", $"use {driveLetter}: /delete /y");
-        if (code != 0)
+        catch (Exception ex)
         {
-            GuestLogger.Error("unmap.failed", "Unmap fehlgeschlagen.", new { code, driveLetter });
+            GuestLogger.Error("mapping.failed", "HyperTool-File-Modus konnte nicht vorbereitet werden.", new
+            {
+                mode = "hypertool-file",
+                driveLetter,
+                sharePath = config.SharePath,
+                error = ex.Message
+            });
             return 1;
         }
+    }
 
-        GuestLogger.Info("unmap.success", "Laufwerk getrennt.", new { driveLetter });
+    private static async Task<int> UnmapDriveAsync(GuestConfig config, string driveLetter)
+    {
+        await (_winFspMountService ??= new GuestWinFspMountService()).UnmountAsync(driveLetter, CancellationToken.None);
+        GuestLogger.Info("unmap.success", "HyperTool-File-Mount getrennt.", new { driveLetter });
         return 0;
     }
 
     private static async Task UpdateHandshakeStateAsync(GuestConfig config, string driveLetter, GuestHandshakeState handshakeState)
     {
-        var mapping = await QueryDriveMappingAsync(driveLetter);
+        try
+        {
+            await GuestFileServiceModeHelper.EnsureShareAvailableAsync(config.SharePath, CancellationToken.None);
+            handshakeState.IsMapped = true;
+            handshakeState.MappedRemotePath = $"hypertool-file://{GuestFileServiceModeHelper.ResolveShareName(config.SharePath)}";
+        }
+        catch
+        {
+            handshakeState.IsMapped = false;
+            handshakeState.MappedRemotePath = string.Empty;
+        }
+
         var autostart = await GuestAutostartService.QueryStatusAsync(config);
 
         handshakeState.TimestampUtc = DateTime.UtcNow;
-        handshakeState.IsMapped = mapping.Exists;
-        handshakeState.MappedRemotePath = mapping.RemotePath;
         handshakeState.RunRegistryInstalled = autostart.RunRegistryInstalled;
         handshakeState.TaskInstalled = autostart.TaskInstalled;
     }
 
-    private static async Task<DriveMappingStatus> QueryDriveMappingAsync(string driveLetter)
-    {
-        var result = await RunProcessWithOutputAsync("net", $"use {driveLetter}:");
-        if (result.ExitCode != 0)
-        {
-            return new DriveMappingStatus(false, string.Empty);
-        }
+    private static GuestConfig? _activeConfig;
+    private static GuestWinFspMountService? _winFspMountService;
 
-        var lines = result.Output
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Trim())
-            .ToList();
-
-        var remotePath = lines
-            .Select(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-            .FirstOrDefault(parts => parts.Length >= 3 && parts[1].Equals($"{driveLetter}:", StringComparison.OrdinalIgnoreCase))?
-            .ElementAtOrDefault(2)
-            ?? string.Empty;
-
-        return new DriveMappingStatus(!string.IsNullOrWhiteSpace(remotePath), remotePath);
-    }
-
-    private static async Task<int> RunProcessAsync(string fileName, string arguments)
-    {
-        var result = await RunProcessWithOutputAsync(fileName, arguments);
-        if (!string.IsNullOrWhiteSpace(result.Output))
-        {
-            GuestLogger.Info("process.output", "Prozessausgabe.", new { fileName, arguments, result.Output });
-        }
-
-        return result.ExitCode;
-    }
-
-    private static async Task<ProcessResult> RunProcessWithOutputAsync(string fileName, string arguments)
-    {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = arguments,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        using var process = new Process { StartInfo = startInfo };
-        process.Start();
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-
-        await process.WaitForExitAsync();
-
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-        var output = string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}{Environment.NewLine}{stderr}";
-
-        return new ProcessResult(process.ExitCode, output);
-    }
-
-    private static string NormalizeUnc(string value)
-        => value.Trim().TrimEnd('\\');
-
-    private readonly record struct DriveMappingStatus(bool Exists, string RemotePath);
-
-    private readonly record struct ProcessResult(int ExitCode, string Output);
 }

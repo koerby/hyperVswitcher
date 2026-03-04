@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using HyperTool.Models;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -9,6 +10,7 @@ namespace HyperTool.Services;
 public sealed class HyperVSocketHostIdentityHostListener : IDisposable
 {
     private readonly Guid _serviceId;
+    private readonly Func<HostFeatureAvailability>? _featureAvailabilityProvider;
     private Socket? _listener;
     private CancellationTokenSource? _cts;
     private Task? _acceptLoopTask;
@@ -18,9 +20,10 @@ public sealed class HyperVSocketHostIdentityHostListener : IDisposable
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public HyperVSocketHostIdentityHostListener(Guid? serviceId = null)
+    public HyperVSocketHostIdentityHostListener(Guid? serviceId = null, Func<HostFeatureAvailability>? featureAvailabilityProvider = null)
     {
         _serviceId = serviceId ?? HyperVSocketUsbTunnelDefaults.HostIdentityServiceId;
+        _featureAvailabilityProvider = featureAvailabilityProvider;
     }
 
     public bool IsRunning { get; private set; }
@@ -97,10 +100,25 @@ public sealed class HyperVSocketHostIdentityHostListener : IDisposable
     {
         await using var stream = new NetworkStream(socket, ownsSocket: true);
 
+        HostFeatureAvailability featureAvailability;
+        try
+        {
+            featureAvailability = _featureAvailabilityProvider?.Invoke() ?? new HostFeatureAvailability();
+        }
+        catch
+        {
+            featureAvailability = new HostFeatureAvailability();
+        }
+
         var payload = JsonSerializer.Serialize(new
         {
             hostName = Environment.MachineName,
             fqdn = ResolveFqdn(),
+            features = new
+            {
+                usbSharingEnabled = featureAvailability.UsbSharingEnabled,
+                sharedFoldersEnabled = featureAvailability.SharedFoldersEnabled
+            },
             timestampUtc = DateTime.UtcNow
         }, SerializerOptions);
 

@@ -68,10 +68,14 @@ public sealed class UpdateSettings
 
 public sealed class UsbSettings
 {
+    public bool Enabled { get; set; } = true;
+
     public List<string> AutoShareDeviceKeys { get; set; } = [];
 }
 
 public sealed class SharedFolderSettings
 {
+    public bool Enabled { get; set; } = true;
+
     public List<HostSharedFolderDefinition> HostDefinitions { get; set; } = [];
 }

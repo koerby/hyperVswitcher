@@ -176,11 +176,18 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _usbStatusText = "Noch nicht geladen";
+
+    [ObservableProperty]
+    private bool _hostUsbSharingEnabled = true;
+
     [ObservableProperty]
     private bool _usbRuntimeAvailable = true;
 
     [ObservableProperty]
     private string _usbRuntimeHintText = string.Empty;
+
+    [ObservableProperty]
+    private bool _hostSharedFoldersEnabled = true;
 
     [ObservableProperty]
     private string _usbDiagnosticsHyperVSocketText = "Unbekannt";
@@ -425,6 +432,8 @@ public partial class MainViewModel : ViewModelBase
         UpdateCheckOnStartup = configResult.Config.Update.CheckOnStartup;
         GithubOwner = configResult.Config.Update.GitHubOwner;
         GithubRepo = configResult.Config.Update.GitHubRepo;
+        HostUsbSharingEnabled = configResult.Config.Usb.Enabled;
+        HostSharedFoldersEnabled = configResult.Config.SharedFolders.Enabled;
         _usbAutoShareDeviceKeys.Clear();
         foreach (var key in configResult.Config.Usb.AutoShareDeviceKeys)
         {
@@ -496,7 +505,7 @@ public partial class MainViewModel : ViewModelBase
         OpenConsoleByNameCommand = new AsyncRelayCommand<string>(OpenConsoleByNameAsync, _ => !IsBusy);
         CreateSnapshotByNameCommand = new AsyncRelayCommand<string>(CreateSnapshotByNameAsync, _ => !IsBusy);
 
-        RefreshUsbDevicesCommand = new AsyncRelayCommand(RefreshUsbDevicesAsync, () => !IsBusy && UsbRuntimeAvailable);
+        RefreshUsbDevicesCommand = new AsyncRelayCommand(RefreshUsbDevicesAsync, () => !IsBusy && UsbRuntimeAvailable && HostUsbSharingEnabled);
         BindUsbDeviceCommand = new AsyncRelayCommand(BindSelectedUsbDeviceAsync, CanExecuteBindUsbAction);
         UnbindUsbDeviceCommand = new AsyncRelayCommand(UnbindSelectedUsbDeviceAsync, CanExecuteUnbindUsbAction);
         DetachUsbDeviceCommand = new AsyncRelayCommand(DetachSelectedUsbDeviceAsync, CanExecuteDetachUsbAction);
@@ -653,6 +662,73 @@ public partial class MainViewModel : ViewModelBase
     partial void OnGithubOwnerChanged(string value) => MarkConfigDirty();
 
     partial void OnGithubRepoChanged(string value) => MarkConfigDirty();
+
+    partial void OnHostUsbSharingEnabledChanged(bool value)
+    {
+        RefreshUsbDevicesCommand?.NotifyCanExecuteChanged();
+        BindUsbDeviceCommand?.NotifyCanExecuteChanged();
+        UnbindUsbDeviceCommand?.NotifyCanExecuteChanged();
+        DetachUsbDeviceCommand?.NotifyCanExecuteChanged();
+
+        if (!value)
+        {
+            UsbDevices.Clear();
+            SelectedUsbDevice = null;
+            UsbStatusText = "USB Share ist global im Host deaktiviert.";
+            UsbRuntimeHintText = string.Empty;
+        }
+
+        MarkConfigDirty();
+        NotifyTrayStateChanged();
+    }
+
+    partial void OnHostSharedFoldersEnabledChanged(bool value)
+    {
+        MarkConfigDirty();
+    }
+
+    public async Task SetHostUsbSharingEnabledAsync(bool enabled)
+    {
+        if (HostUsbSharingEnabled == enabled)
+        {
+            return;
+        }
+
+        if (!enabled)
+        {
+            if (!UsbRuntimeAvailable)
+            {
+                HostUsbSharingEnabled = false;
+                return;
+            }
+
+            try
+            {
+                await UnshareAllSharedUsbAsync(
+                    timeout: TimeSpan.FromSeconds(20),
+                    successMessage: "Beim Deaktivieren wurden {0} USB-Freigabe(n) entfernt.",
+                    failedMessage: "Beim Deaktivieren konnten {0} USB-Freigabe(n) nicht entfernt werden.",
+                    logContext: "host-usb-disable");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "USB-Freigaben konnten beim Deaktivieren nicht vollständig entfernt werden.");
+                AddNotification("USB-Freigaben konnten nicht vollständig entfernt werden (usbipd ggf. nicht verfügbar).", "Warning");
+            }
+        }
+
+        HostUsbSharingEnabled = enabled;
+    }
+
+    public Task SetHostSharedFoldersEnabledAsync(bool enabled)
+    {
+        if (HostSharedFoldersEnabled != enabled)
+        {
+            HostSharedFoldersEnabled = enabled;
+        }
+
+        return Task.CompletedTask;
+    }
 
     partial void OnSelectedVmChanged(VmDefinition? value)
     {
@@ -916,6 +992,7 @@ public partial class MainViewModel : ViewModelBase
     private bool CanExecuteBindUsbAction()
     {
          return !IsBusy
+                         && HostUsbSharingEnabled
              && UsbRuntimeAvailable
                && SelectedUsbDevice is not null
                && !string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId)
@@ -925,6 +1002,7 @@ public partial class MainViewModel : ViewModelBase
     private bool CanExecuteUnbindUsbAction()
     {
          return !IsBusy
+                         && HostUsbSharingEnabled
              && UsbRuntimeAvailable
                && SelectedUsbDevice is not null
                && !string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId)
@@ -934,6 +1012,7 @@ public partial class MainViewModel : ViewModelBase
     private bool CanExecuteDetachUsbAction()
     {
          return !IsBusy
+                         && HostUsbSharingEnabled
              && UsbRuntimeAvailable
                && SelectedUsbDevice is not null
                && !string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId)
@@ -949,6 +1028,11 @@ public partial class MainViewModel : ViewModelBase
         BindUsbDeviceCommand.NotifyCanExecuteChanged();
         UnbindUsbDeviceCommand.NotifyCanExecuteChanged();
         DetachUsbDeviceCommand.NotifyCanExecuteChanged();
+
+        if (!value && HostUsbSharingEnabled)
+        {
+            HostUsbSharingEnabled = false;
+        }
     }
     private bool CanExecuteStopVmAction() => CanExecuteVmAction() && IsRunningState(SelectedVmState);
 
@@ -967,6 +1051,7 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task InitializeAsync()
     {
+        await RefreshUsbRuntimeAvailabilityAsync();
         await LoadVmsFromHyperVWithRetryAsync();
         await RefreshSwitchesAsync();
         await RefreshVmStatusAsync();
@@ -975,6 +1060,32 @@ public partial class MainViewModel : ViewModelBase
         if (UpdateCheckOnStartup)
         {
             await CheckForUpdatesAsync();
+        }
+    }
+
+    public async Task RefreshUsbRuntimeAvailabilityAsync()
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+            await _usbIpService.GetDevicesAsync(cts.Token);
+
+            UsbRuntimeAvailable = true;
+            UsbRuntimeHintText = string.Empty;
+        }
+        catch (Exception ex) when (IsUsbRuntimeMissing(ex.Message))
+        {
+            UsbRuntimeAvailable = false;
+            UsbRuntimeHintText = "USB-Funktion deaktiviert: usbipd-win ist nicht installiert. Quelle: https://github.com/dorssel/usbipd-win";
+            UsbStatusText = BuildUsbUnavailableStatus(ex.Message);
+
+            if (HostUsbSharingEnabled)
+            {
+                HostUsbSharingEnabled = false;
+            }
+        }
+        catch
+        {
         }
     }
 
@@ -1310,6 +1421,15 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task RefreshUsbDevicesAsync()
     {
+        if (!HostUsbSharingEnabled)
+        {
+            UsbDevices.Clear();
+            SelectedUsbDevice = null;
+            UsbStatusText = "USB Share ist global im Host deaktiviert.";
+            AddNotification(UsbStatusText, "Info");
+            return;
+        }
+
         if (!UsbRuntimeAvailable)
         {
             UsbStatusText = string.IsNullOrWhiteSpace(UsbRuntimeHintText)
@@ -1324,6 +1444,22 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task LoadUsbDevicesAsync(bool showNotification, bool applyAutoShare = true, bool useBusyIndicator = true)
     {
+        if (!HostUsbSharingEnabled)
+        {
+            UsbDevices.Clear();
+            SelectedUsbDevice = null;
+            UsbStatusText = "USB Share ist global im Host deaktiviert.";
+            UsbRuntimeHintText = string.Empty;
+
+            if (showNotification)
+            {
+                AddNotification(UsbStatusText, "Info");
+            }
+
+            NotifyTrayStateChanged();
+            return;
+        }
+
         var previouslySelectedBusId = SelectedUsbDevice?.BusId;
         UsbStatusText = "USB-Geräte werden geladen...";
 
@@ -2495,12 +2631,14 @@ public partial class MainViewModel : ViewModelBase
                 },
                 Usb = new UsbSettings
                 {
+                    Enabled = HostUsbSharingEnabled,
                     AutoShareDeviceKeys = _usbAutoShareDeviceKeys
                         .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
                         .ToList()
                 },
                 SharedFolders = new SharedFolderSettings
                 {
+                    Enabled = HostSharedFoldersEnabled,
                     HostDefinitions = HostSharedFolders
                         .Select(CloneSharedFolderDefinition)
                         .OrderBy(folder => folder.Label, StringComparer.OrdinalIgnoreCase)
@@ -2574,6 +2712,11 @@ public partial class MainViewModel : ViewModelBase
 
     public IReadOnlyList<HostSharedFolderDefinition> GetHostSharedFoldersSnapshot()
     {
+        if (!HostSharedFoldersEnabled)
+        {
+            return [];
+        }
+
         return HostSharedFolders
             .Select(CloneSharedFolderDefinition)
             .ToList();
@@ -2668,6 +2811,11 @@ public partial class MainViewModel : ViewModelBase
 
     public IReadOnlyList<UsbIpDeviceInfo> GetUsbDevicesForTray()
     {
+        if (!HostUsbSharingEnabled)
+        {
+            return [];
+        }
+
         return UsbDevices
             .Select(device => new UsbIpDeviceInfo
             {
@@ -2719,6 +2867,11 @@ public partial class MainViewModel : ViewModelBase
 
     public async Task RefreshUsbDevicesFromTrayAsync()
     {
+        if (!HostUsbSharingEnabled)
+        {
+            return;
+        }
+
         var gateEntered = false;
         try
         {
@@ -2740,6 +2893,12 @@ public partial class MainViewModel : ViewModelBase
 
     public async Task ShareSelectedUsbFromTrayAsync()
     {
+        if (!HostUsbSharingEnabled)
+        {
+            AddNotification("USB Share ist global im Host deaktiviert.", "Info");
+            return;
+        }
+
         if (SelectedUsbDevice is null || string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId))
         {
             AddNotification("Kein USB-Gerät für Share ausgewählt.", "Warning");
@@ -2751,6 +2910,12 @@ public partial class MainViewModel : ViewModelBase
 
     public async Task UnshareSelectedUsbFromTrayAsync()
     {
+        if (!HostUsbSharingEnabled)
+        {
+            AddNotification("USB Share ist global im Host deaktiviert.", "Info");
+            return;
+        }
+
         if (SelectedUsbDevice is null || string.IsNullOrWhiteSpace(SelectedUsbDevice.BusId))
         {
             AddNotification("Kein USB-Gerät für Unshare ausgewählt.", "Warning");
@@ -3214,63 +3379,88 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            var devices = await _usbIpService.GetDevicesAsync(shutdownCts.Token);
-            var sharedDevices = devices.Where(device => device.IsShared).ToList();
-
-            if (sharedDevices.Count == 0)
-            {
-                return;
-            }
-
-            var released = 0;
-            var failed = 0;
-
-            foreach (var device in sharedDevices)
-            {
-                try
-                {
-                    if (device.IsAttached && !string.IsNullOrWhiteSpace(device.BusId))
-                    {
-                        await _usbIpService.DetachAsync(device.BusId, shutdownCts.Token);
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(device.BusId))
-                    {
-                        await _usbIpService.UnbindAsync(device.BusId, shutdownCts.Token);
-                    }
-                    else if (!string.IsNullOrWhiteSpace(device.PersistedGuid))
-                    {
-                        await _usbIpService.UnbindByPersistedGuidAsync(device.PersistedGuid, shutdownCts.Token);
-                    }
-                    else
-                    {
-                        failed++;
-                        continue;
-                    }
-
-                    released++;
-                }
-                catch (Exception ex)
-                {
-                    failed++;
-                    Log.Warning(ex, "Freigeben von USB-Gerät beim Shutdown fehlgeschlagen (BusId={BusId}, Guid={Guid}).", device.BusId, device.PersistedGuid);
-                }
-            }
-
-            if (released > 0)
-            {
-                AddNotification($"Beim Beenden wurden {released} USB-Freigabe(n) entfernt.", "Info");
-            }
-
-            if (failed > 0)
-            {
-                AddNotification($"Beim Beenden konnten {failed} USB-Freigabe(n) nicht entfernt werden.", "Warning");
-            }
+            await UnshareAllSharedUsbAsync(
+                timeout: TimeSpan.FromSeconds(20),
+                successMessage: "Beim Beenden wurden {0} USB-Freigabe(n) entfernt.",
+                failedMessage: "Beim Beenden konnten {0} USB-Freigabe(n) nicht entfernt werden.",
+                logContext: "shutdown");
         }
         catch (Exception ex)
         {
             Log.Warning(ex, "USB-Freigaben konnten beim Beenden nicht vollständig entfernt werden.");
+        }
+    }
+
+    private async Task UnshareAllSharedUsbAsync(TimeSpan timeout, string successMessage, string failedMessage, string logContext)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        IReadOnlyList<UsbIpDeviceInfo> devices;
+        try
+        {
+            devices = await _usbIpService.GetDevicesAsync(cts.Token);
+        }
+        catch (Exception ex) when (IsUsbRuntimeMissing(ex.Message))
+        {
+            Log.Information("USB-Unshare übersprungen ({Context}): usbipd-win nicht verfügbar.", logContext);
+            UsbRuntimeAvailable = false;
+            UsbRuntimeHintText = "USB-Funktion deaktiviert: usbipd-win ist nicht installiert. Quelle: https://github.com/dorssel/usbipd-win";
+            return;
+        }
+
+        var sharedDevices = devices.Where(device => device.IsShared).ToList();
+
+        if (sharedDevices.Count == 0)
+        {
+            return;
+        }
+
+        var released = 0;
+        var failed = 0;
+
+        foreach (var device in sharedDevices)
+        {
+            try
+            {
+                if (device.IsAttached && !string.IsNullOrWhiteSpace(device.BusId))
+                {
+                    await _usbIpService.DetachAsync(device.BusId, cts.Token);
+                }
+
+                if (!string.IsNullOrWhiteSpace(device.BusId))
+                {
+                    await _usbIpService.UnbindAsync(device.BusId, cts.Token);
+                }
+                else if (!string.IsNullOrWhiteSpace(device.PersistedGuid))
+                {
+                    await _usbIpService.UnbindByPersistedGuidAsync(device.PersistedGuid, cts.Token);
+                }
+                else
+                {
+                    failed++;
+                    continue;
+                }
+
+                released++;
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                Log.Warning(ex,
+                    "Freigeben von USB-Gerät fehlgeschlagen ({Context}) (BusId={BusId}, Guid={Guid}).",
+                    logContext,
+                    device.BusId,
+                    device.PersistedGuid);
+            }
+        }
+
+        if (released > 0)
+        {
+            AddNotification(string.Format(successMessage, released), "Info");
+        }
+
+        if (failed > 0)
+        {
+            AddNotification(string.Format(failedMessage, failed), "Warning");
         }
     }
 

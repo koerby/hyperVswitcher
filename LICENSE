@@ -19,3 +19,19 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Third-Party Runtime Notice
+
+Documentation baseline for this notice: HyperTool v2.3.5.
+
+HyperTool can optionally integrate with external runtime dependencies that are
+maintained outside this repository and are distributed under their own licenses:
+
+- usbipd-win (Host USB runtime): https://github.com/dorssel/usbipd-win
+- usbip-win2 (Guest USB runtime): https://github.com/vadimgrn/usbip-win2
+- WinFsp (Guest shared-folder runtime): https://github.com/winfsp/winfsp
+
+Their copyright and license terms are defined by the respective upstream
+projects and remain unaffected by HyperTool's MIT license.

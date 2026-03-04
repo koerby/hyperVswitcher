@@ -8,10 +8,10 @@ public static class HyperVSocketUsbTunnelDefaults
     public static readonly Guid DiagnosticsServiceId = Guid.Parse(DiagnosticsServiceIdString);
     public const string SharedFolderCatalogServiceIdString = "e7db04df-0e32-4f30-a4dc-c6cbc31a8792";
     public static readonly Guid SharedFolderCatalogServiceId = Guid.Parse(SharedFolderCatalogServiceIdString);
-    public const string SharedFolderCredentialServiceIdString = "0f9db05a-531f-4fd8-9b4d-675f5f06f0d8";
-    public static readonly Guid SharedFolderCredentialServiceId = Guid.Parse(SharedFolderCredentialServiceIdString);
     public const string HostIdentityServiceIdString = "54b2c423-6f79-47d8-a77d-8cab14e3f041";
     public static readonly Guid HostIdentityServiceId = Guid.Parse(HostIdentityServiceIdString);
+    public const string FileServiceIdString = "91df7cec-c5ba-452a-b072-42e5f672d5f9";
+    public static readonly Guid FileServiceId = Guid.Parse(FileServiceIdString);
     public static readonly Guid VmIdParent = Guid.Parse("a42e7cda-d03f-480c-9cc2-a4de20abb878");
     public static readonly Guid VmIdWildcard = Guid.Empty;
     public const int UsbIpTcpPort = 3240;

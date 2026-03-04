@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text;
 
 namespace HyperTool.Guest;
 
@@ -30,6 +31,25 @@ internal static class GuestLogger
         CleanupOldLogFiles(directory, LogRetentionPeriod);
         _logFilePath = Path.Combine(directory, fileName);
         _echoToConsole = settings.EchoToConsole;
+
+        try
+        {
+            if (!File.Exists(_logFilePath))
+            {
+                File.WriteAllText(_logFilePath, string.Empty, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        }
+        catch
+        {
+        }
     }
 
     public static void Info(string eventName, string message, object? data = null)
@@ -60,7 +80,7 @@ internal static class GuestLogger
         {
             if (!string.IsNullOrWhiteSpace(_logFilePath))
             {
-                File.AppendAllText(_logFilePath, line + Environment.NewLine);
+                File.AppendAllText(_logFilePath, line + Environment.NewLine, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             }
 
             if (_echoToConsole)

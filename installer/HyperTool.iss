@@ -50,31 +50,41 @@ english.DesktopIconTask=Create desktop shortcut
 english.AdditionalTasks=Additional tasks:
 english.UninstallShortcut=Uninstall HyperTool
 english.RunAfterInstall=Launch HyperTool
-english.UsbipdInstallTask=Download and install usbipd-win (optional, requires internet connection)
+english.UsbipdInstallTask=Install usbipd-win for Host USB sharing / passthrough to Guest VMs (optional, requires internet connection)
 english.UsbipdInstallFailed=usbipd-win could not be installed automatically. Please install it manually from https://github.com/dorssel/usbipd-win/releases and then restart HyperTool.
-english.SharedFolderPrincipalTask=Create HyperTool SharedFolder local group/user (optional, recommended)
-english.SharedFolderPrincipalFailed=HyperTool SharedFolder group/user could not be provisioned automatically. You can run the provisioning script later from the installed HyperTool folder.
+english.UsbipdInstallStarted=usbipd-win installation was started in background. The setup will now finish; if usbipd-win is still missing later, use the install button in HyperTool.
+english.HyperToolFileServiceTask=Register HyperTool Hyper-V socket file service (optional, recommended)
+english.HyperToolFileServiceFailed=HyperTool Hyper-V socket file service could not be registered automatically. Start HyperTool as administrator and retry in Shared Folder menu.
+english.UninstallDepsTitle=Optional dependency cleanup
+english.UninstallDepsText=Select optional dependencies that should also be removed during HyperTool uninstall.
+english.UninstallUsbipdCheckbox=Also uninstall usbipd-win (if installed)
 
 german.DesktopIconTask=Desktop-Verknüpfung erstellen
 german.AdditionalTasks=Zusätzliche Aufgaben:
 german.UninstallShortcut=HyperTool deinstallieren
 german.RunAfterInstall=HyperTool starten
-german.UsbipdInstallTask=usbipd-win herunterladen und installieren (optional, Internetverbindung erforderlich)
+german.UsbipdInstallTask=usbipd-win fuer Host-USB-Sharing / Passthrough zu Guest-VMs installieren (optional, Internetverbindung erforderlich)
 german.UsbipdInstallFailed=usbipd-win konnte nicht automatisch installiert werden. Bitte manuell von https://github.com/dorssel/usbipd-win/releases installieren und HyperTool danach neu starten.
-german.SharedFolderPrincipalTask=HyperTool SharedFolder lokale Gruppe/Benutzer anlegen (optional, empfohlen)
-german.SharedFolderPrincipalFailed=HyperTool SharedFolder Gruppe/Benutzer konnte nicht automatisch angelegt werden. Das Provisioning-Skript kann später aus dem installierten HyperTool-Ordner gestartet werden.
+german.UsbipdInstallStarted=Die usbipd-win Installation wurde im Hintergrund gestartet. Das Setup wird jetzt beendet; falls usbipd-win spaeter noch fehlt, nutze den Installationsbutton in HyperTool.
+german.HyperToolFileServiceTask=HyperTool Hyper-V Socket File Service registrieren (optional, empfohlen)
+german.HyperToolFileServiceFailed=HyperTool Hyper-V Socket File Service konnte nicht automatisch registriert werden. HyperTool als Administrator starten und im Shared-Folder-Menü erneut ausführen.
+german.UninstallDepsTitle=Optionale Abhängigkeits-Bereinigung
+german.UninstallDepsText=Wähle optionale Abhängigkeiten aus, die bei der HyperTool-Deinstallation ebenfalls entfernt werden sollen.
+german.UninstallUsbipdCheckbox=usbipd-win ebenfalls deinstallieren (falls installiert)
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:DesktopIconTask}"; GroupDescription: "{cm:AdditionalTasks}"
-Name: "installusbipd"; Description: "{cm:UsbipdInstallTask}"; GroupDescription: "{cm:AdditionalTasks}"; Check: not IsUsbipdInstalled
-Name: "installsharedfolderprincipal"; Description: "{cm:SharedFolderPrincipalTask}"; GroupDescription: "{cm:AdditionalTasks}"; Check: IsSharedFolderPrincipalMissing
+Name: "installusbipd"; Description: "{cm:UsbipdInstallTask}"; GroupDescription: "{cm:AdditionalTasks}"; Flags: checkedonce; Check: not IsUsbipdInstalled
 
 [Files]
-Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs
+Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs; Excludes: "Scripts\HyperToolCredentialProvisioning.ps1,tools\*Credential*.ps1"
 
 [Registry]
-Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\6c4eb1be-40e8-4c8b-a4d6-5b0f67d7e40f"; ValueType: string; ValueName: "ElementName"; ValueData: "HyperTool Hyper-V Socket USB Tunnel"; Flags: uninsdeletekeyifempty
-Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\67c53bca-3f3d-4628-98e4-e45be5d6d1ad"; ValueType: string; ValueName: "ElementName"; ValueData: "HyperTool Hyper-V Socket Diagnostics"; Flags: uninsdeletekeyifempty
+Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\6c4eb1be-40e8-4c8b-a4d6-5b0f67d7e40f"; ValueType: string; ValueName: "ElementName"; ValueData: "HyperTool Hyper-V Socket USB Tunnel"; Flags: uninsdeletekey
+Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\67c53bca-3f3d-4628-98e4-e45be5d6d1ad"; ValueType: string; ValueName: "ElementName"; ValueData: "HyperTool Hyper-V Socket Diagnostics"; Flags: uninsdeletekey
+Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\e7db04df-0e32-4f30-a4dc-c6cbc31a8792"; ValueType: string; ValueName: "ElementName"; ValueData: "HyperTool Hyper-V Socket Shared Folder Catalog"; Flags: uninsdeletekey
+Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\54b2c423-6f79-47d8-a77d-8cab14e3f041"; ValueType: string; ValueName: "ElementName"; ValueData: "HyperTool Hyper-V Socket Host Identity"; Flags: uninsdeletekey
+Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\91df7cec-c5ba-452a-b072-42e5f672d5f9"; ValueType: string; ValueName: "ElementName"; ValueData: "HyperTool Hyper-V Socket File Service"; Flags: uninsdeletekey
 
 [Icons]
 Name: "{group}\HyperTool"; Filename: "{app}\HyperTool.exe"; IconFilename: "{app}\Assets\HyperTool.ico"
@@ -84,13 +94,136 @@ Name: "{autodesktop}\HyperTool"; Filename: "{app}\HyperTool.exe"; IconFilename: 
 [Run]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""HyperTool USB Discovery (UDP-In)"" dir=in action=allow protocol=UDP localport=32491 profile=private,domain program=""{app}\HyperTool.exe"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""HyperTool USB Discovery (UDP-Out)"" dir=out action=allow protocol=UDP remoteport=32491 profile=private,domain program=""{app}\HyperTool.exe"""; Flags: runhidden waituntilterminated
-Filename: "{app}\HyperTool.exe"; Description: "{cm:RunAfterInstall}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\HyperTool.exe"; Description: "{cm:RunAfterInstall}"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
+Filename: "{sys}\taskkill.exe"; Parameters: "/IM HyperTool.exe /T"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "HyperTool-Uninstall-StopApp"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""HyperTool USB Discovery (UDP-In)"""; Flags: runhidden waituntilterminated; RunOnceId: "HyperTool-Uninstall-DeleteFirewall-UDP-In"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""HyperTool USB Discovery (UDP-Out)"""; Flags: runhidden waituntilterminated; RunOnceId: "HyperTool-Uninstall-DeleteFirewall-UDP-Out"
+Filename: "{cmd}"; Parameters: "/C reg delete ""HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\6c4eb1be-40e8-4c8b-a4d6-5b0f67d7e40f"" /f"; Flags: runhidden waituntilterminated; RunOnceId: "HyperTool-Uninstall-DeleteSvc-UsbTunnel"
+Filename: "{cmd}"; Parameters: "/C reg delete ""HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\67c53bca-3f3d-4628-98e4-e45be5d6d1ad"" /f"; Flags: runhidden waituntilterminated; RunOnceId: "HyperTool-Uninstall-DeleteSvc-Diagnostics"
+Filename: "{cmd}"; Parameters: "/C reg delete ""HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\e7db04df-0e32-4f30-a4dc-c6cbc31a8792"" /f"; Flags: runhidden waituntilterminated; RunOnceId: "HyperTool-Uninstall-DeleteSvc-Catalog"
+Filename: "{cmd}"; Parameters: "/C reg delete ""HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\54b2c423-6f79-47d8-a77d-8cab14e3f041"" /f"; Flags: runhidden waituntilterminated; RunOnceId: "HyperTool-Uninstall-DeleteSvc-HostIdentity"
+Filename: "{cmd}"; Parameters: "/C reg delete ""HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\91df7cec-c5ba-452a-b072-42e5f672d5f9"" /f"; Flags: runhidden waituntilterminated; RunOnceId: "HyperTool-Uninstall-DeleteSvc-FileService"
+Filename: "{cmd}"; Parameters: "/C winget.exe uninstall --id dorssel.usbipd-win --exact --silent --accept-source-agreements --accept-package-agreements"; Flags: runhidden waituntilterminated; Check: ShouldRemoveUsbipdOnUninstall; RunOnceId: "HyperTool-Uninstall-Optional-Usbipd-WingetId"
+Filename: "{cmd}"; Parameters: "/C winget.exe uninstall --name ""usbipd-win"" --exact --silent --accept-source-agreements --accept-package-agreements"; Flags: runhidden waituntilterminated; Check: ShouldRemoveUsbipdOnUninstall; RunOnceId: "HyperTool-Uninstall-Optional-Usbipd-WingetName"
+Filename: "{cmd}"; Parameters: "/C ""%LOCALAPPDATA%\Microsoft\WindowsApps\winget.exe"" uninstall --id dorssel.usbipd-win --exact --silent --accept-source-agreements --accept-package-agreements"; Flags: runhidden waituntilterminated; Check: ShouldRemoveUsbipdOnUninstall; RunOnceId: "HyperTool-Uninstall-Optional-Usbipd-WingetId-LocalAppData"
+Filename: "{cmd}"; Parameters: "/C ""%LOCALAPPDATA%\Microsoft\WindowsApps\winget.exe"" uninstall --name ""usbipd-win"" --exact --silent --accept-source-agreements --accept-package-agreements"; Flags: runhidden waituntilterminated; Check: ShouldRemoveUsbipdOnUninstall; RunOnceId: "HyperTool-Uninstall-Optional-Usbipd-WingetName-LocalAppData"
+Filename: "{commonpf64}\usbipd-win\unins000.exe"; Parameters: "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"; Flags: runhidden waituntilterminated skipifdoesntexist; Check: ShouldRemoveUsbipdOnUninstall; RunOnceId: "HyperTool-Uninstall-Optional-Usbipd-Unins64"
+Filename: "{commonpf}\usbipd-win\unins000.exe"; Parameters: "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"; Flags: runhidden waituntilterminated skipifdoesntexist; Check: ShouldRemoveUsbipdOnUninstall; RunOnceId: "HyperTool-Uninstall-Optional-Usbipd-Unins32"
 
 [Code]
+var
+  RemoveUsbipdOnUninstall: Boolean;
+  UninstallOptionsPrompted: Boolean;
+  OptionalDepsUninstallExecuted: Boolean;
+
+function HasUninstallDisplayNameMatching(const NamePart: string): Boolean;
+var
+  SubKeys: TArrayOfString;
+  Root: Integer;
+  BaseKey: string;
+  DisplayName: string;
+  I: Integer;
+begin
+  Result := False;
+
+  for Root := 0 to 2 do
+  begin
+    BaseKey := 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall';
+
+    if (Root = 0) and RegGetSubkeyNames(HKLM64, BaseKey, SubKeys) then
+    begin
+      for I := 0 to GetArrayLength(SubKeys) - 1 do
+      begin
+        if RegQueryStringValue(HKLM64, BaseKey + '\\' + SubKeys[I], 'DisplayName', DisplayName)
+           and (Pos(LowerCase(NamePart), LowerCase(DisplayName)) > 0) then
+        begin
+          Result := True;
+          Exit;
+        end;
+      end;
+    end;
+
+    if (Root = 1) and RegGetSubkeyNames(HKLM32, BaseKey, SubKeys) then
+    begin
+      for I := 0 to GetArrayLength(SubKeys) - 1 do
+      begin
+        if RegQueryStringValue(HKLM32, BaseKey + '\\' + SubKeys[I], 'DisplayName', DisplayName)
+           and (Pos(LowerCase(NamePart), LowerCase(DisplayName)) > 0) then
+        begin
+          Result := True;
+          Exit;
+        end;
+      end;
+    end;
+
+    if (Root = 2) and RegGetSubkeyNames(HKCU, BaseKey, SubKeys) then
+    begin
+      for I := 0 to GetArrayLength(SubKeys) - 1 do
+      begin
+        if RegQueryStringValue(HKCU, BaseKey + '\\' + SubKeys[I], 'DisplayName', DisplayName)
+           and (Pos(LowerCase(NamePart), LowerCase(DisplayName)) > 0) then
+        begin
+          Result := True;
+          Exit;
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure TryUninstallByDisplayName(const NamePart: string);
+var
+  SubKeys: TArrayOfString;
+  BaseKey: string;
+  DisplayName: string;
+  CommandLine: string;
+  Root: Integer;
+  I: Integer;
+  ResultCode: Integer;
+begin
+  BaseKey := 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall';
+
+  for Root := 0 to 2 do
+  begin
+    if ((Root = 0) and RegGetSubkeyNames(HKLM64, BaseKey, SubKeys))
+       or ((Root = 1) and RegGetSubkeyNames(HKLM32, BaseKey, SubKeys))
+       or ((Root = 2) and RegGetSubkeyNames(HKCU, BaseKey, SubKeys)) then
+    begin
+      for I := 0 to GetArrayLength(SubKeys) - 1 do
+      begin
+        DisplayName := '';
+        CommandLine := '';
+
+        if Root = 0 then
+        begin
+          RegQueryStringValue(HKLM64, BaseKey + '\\' + SubKeys[I], 'DisplayName', DisplayName);
+          if not RegQueryStringValue(HKLM64, BaseKey + '\\' + SubKeys[I], 'QuietUninstallString', CommandLine) then
+            RegQueryStringValue(HKLM64, BaseKey + '\\' + SubKeys[I], 'UninstallString', CommandLine);
+        end
+        else if Root = 1 then
+        begin
+          RegQueryStringValue(HKLM32, BaseKey + '\\' + SubKeys[I], 'DisplayName', DisplayName);
+          if not RegQueryStringValue(HKLM32, BaseKey + '\\' + SubKeys[I], 'QuietUninstallString', CommandLine) then
+            RegQueryStringValue(HKLM32, BaseKey + '\\' + SubKeys[I], 'UninstallString', CommandLine);
+        end
+        else
+        begin
+          RegQueryStringValue(HKCU, BaseKey + '\\' + SubKeys[I], 'DisplayName', DisplayName);
+          if not RegQueryStringValue(HKCU, BaseKey + '\\' + SubKeys[I], 'QuietUninstallString', CommandLine) then
+            RegQueryStringValue(HKCU, BaseKey + '\\' + SubKeys[I], 'UninstallString', CommandLine);
+        end;
+
+        if (Pos(LowerCase(NamePart), LowerCase(DisplayName)) > 0) and (Trim(CommandLine) <> '') then
+        begin
+          Exec(ExpandConstant('{cmd}'), '/C ' + CommandLine, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        end;
+      end;
+    end;
+  end;
+end;
+
 procedure CloseRunningHostApp;
 var
   ResultCode: Integer;
@@ -115,67 +248,69 @@ begin
 
   if not Result then
   begin
-    Result := FileExists(ExpandConstant('{pf}\\usbipd-win\\usbipd.exe'));
+    Result := FileExists(ExpandConstant('{commonpf}\\usbipd-win\\usbipd.exe'));
+  end;
+
+  if not Result then
+  begin
+    Result := HasUninstallDisplayNameMatching('usbipd-win');
   end;
 end;
 
-function IsSharedFolderPrincipalMissing(): Boolean;
-var
-  ResultCode: Integer;
-  GroupExists: Boolean;
-  UserExists: Boolean;
+function ShouldRemoveUsbipdOnUninstall(): Boolean;
 begin
-  GroupExists := False;
-  UserExists := False;
-
-  if Exec(ExpandConstant('{sys}\net.exe'), 'localgroup "HyperTool"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    GroupExists := (ResultCode = 0);
-
-  if Exec(ExpandConstant('{sys}\net.exe'), 'user "HyperToolGuest"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    UserExists := (ResultCode = 0);
-
-  Result := not (GroupExists and UserExists);
+  Result := RemoveUsbipdOnUninstall;
 end;
 
-procedure TryProvisionSharedFolderPrincipal;
+procedure PromptUninstallOptions;
+begin
+  RemoveUsbipdOnUninstall := False;
+
+  if IsUsbipdInstalled() then
+  begin
+    if SuppressibleMsgBox(
+      ExpandConstant('{cm:UninstallDepsText}') + #13#10#13#10 + ExpandConstant('{cm:UninstallUsbipdCheckbox}'),
+      mbConfirmation,
+      MB_YESNO,
+      IDNO) = IDYES then
+    begin
+      RemoveUsbipdOnUninstall := True;
+    end;
+  end;
+end;
+
+function IsHyperToolFileServiceMissing(): Boolean;
+var
+  Value: string;
+begin
+  Result :=
+    not RegQueryStringValue(
+      HKLM64,
+      'SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Virtualization\\GuestCommunicationServices\\91df7cec-c5ba-452a-b072-42e5f672d5f9',
+      'ElementName',
+      Value);
+end;
+
+procedure TryInstallHyperToolFileService;
 var
   ResultCode: Integer;
-  PsExe: string;
-  ScriptPath: string;
-  Params: string;
 begin
-  if not WizardIsTaskSelected('installsharedfolderprincipal') then
-    Exit;
-
-  ScriptPath := ExpandConstant('{app}\Scripts\HyperToolCredentialProvisioning.ps1');
-  if not FileExists(ScriptPath) then
+  if not FileExists(ExpandConstant('{app}\HyperTool.exe')) then
   begin
-    MsgBox(ExpandConstant('{cm:SharedFolderPrincipalFailed}'), mbInformation, MB_OK);
+    MsgBox(ExpandConstant('{cm:HyperToolFileServiceFailed}'), mbInformation, MB_OK);
     Exit;
   end;
 
-  PsExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
-  if not FileExists(PsExe) then
-    PsExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
-
-  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '"';
-
-  if not Exec(PsExe, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+  if not Exec(ExpandConstant('{app}\HyperTool.exe'), '--register-sharedfolder-socket', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
   begin
-    MsgBox(ExpandConstant('{cm:SharedFolderPrincipalFailed}'), mbInformation, MB_OK);
+    MsgBox(ExpandConstant('{cm:HyperToolFileServiceFailed}'), mbInformation, MB_OK);
   end;
 end;
 
 procedure TryInstallUsbipdFromInternet;
 var
   ResultCode: Integer;
-  PsExe: string;
   WingetArgs: string;
-  WingetInstalled: Boolean;
-  DownloadMsiCommand: string;
-  DownloadExeCommand: string;
-  MsiPath: string;
-  ExePath: string;
 begin
   if not WizardIsTaskSelected('installusbipd') then
     Exit;
@@ -183,77 +318,16 @@ begin
   if IsUsbipdInstalled() then
     Exit;
 
-  PsExe := ExpandConstant('{sys}\\WindowsPowerShell\\v1.0\\powershell.exe');
-  if not FileExists(PsExe) then
-    PsExe := '';
-
   WingetArgs :=
     'install --id dorssel.usbipd-win --exact --silent --accept-source-agreements --accept-package-agreements';
 
-  WingetInstalled := False;
-  if Exec('winget.exe', WingetArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  if Exec(ExpandConstant('{cmd}'), '/C start "" /MIN winget.exe ' + WingetArgs, '', SW_HIDE, ewNoWait, ResultCode) then
   begin
-    if ((ResultCode = 0) or (ResultCode = 3010)) and IsUsbipdInstalled() then
-      Exit;
-
-    WingetInstalled := (ResultCode = 0) or (ResultCode = 3010);
-  end;
-
-  if (PsExe = '') and (not WingetInstalled) then
-  begin
-    MsgBox(ExpandConstant('{cm:UsbipdInstallFailed}'), mbInformation, MB_OK);
+    MsgBox(ExpandConstant('{cm:UsbipdInstallStarted}'), mbInformation, MB_OK);
     Exit;
   end;
 
-  MsiPath := ExpandConstant('{tmp}\\usbipd-win-setup.msi');
-  ExePath := ExpandConstant('{tmp}\\usbipd-win-setup.exe');
-
-  if FileExists(MsiPath) then
-    DeleteFile(MsiPath);
-  if FileExists(ExePath) then
-    DeleteFile(ExePath);
-
-  if PsExe <> '' then
-  begin
-    DownloadMsiCommand :=
-      '-NoProfile -ExecutionPolicy Bypass -Command "' +
-      '$ProgressPreference=''SilentlyContinue''; ' +
-      '$headers=@{ ''User-Agent''=''HyperTool-Installer'' }; ' +
-      '$release=Invoke-RestMethod -Uri ''https://api.github.com/repos/dorssel/usbipd-win/releases/latest'' -Headers $headers; ' +
-      '$asset=$null; foreach($a in $release.assets){ if($a.name -match ''x64.*\\.msi$'' -or $a.name -match ''\\.msi$''){ $asset=$a; break } }; ' +
-      'if($asset){ Invoke-WebRequest -Uri $asset.browser_download_url -Headers $headers -OutFile ''' + MsiPath + ''' }"';
-
-    Exec(PsExe, DownloadMsiCommand, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-    if FileExists(MsiPath) then
-    begin
-      Exec('msiexec.exe', '/i "' + MsiPath + '" /qn /norestart', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      if ((ResultCode = 0) or (ResultCode = 3010)) and IsUsbipdInstalled() then
-        Exit;
-    end;
-
-    DownloadExeCommand :=
-      '-NoProfile -ExecutionPolicy Bypass -Command "' +
-      '$ProgressPreference=''SilentlyContinue''; ' +
-      '$headers=@{ ''User-Agent''=''HyperTool-Installer'' }; ' +
-      '$release=Invoke-RestMethod -Uri ''https://api.github.com/repos/dorssel/usbipd-win/releases/latest'' -Headers $headers; ' +
-      '$asset=$null; foreach($a in $release.assets){ if($a.name -match ''x64.*\\.exe$'' -or $a.name -match ''\\.exe$''){ $asset=$a; break } }; ' +
-      'if($asset){ Invoke-WebRequest -Uri $asset.browser_download_url -Headers $headers -OutFile ''' + ExePath + ''' }"';
-
-    Exec(PsExe, DownloadExeCommand, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-    if FileExists(ExePath) then
-    begin
-      Exec(ExePath, '/SP- /VERYSILENT /SUPPRESSMSGBOXES /NOCANCEL /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      if ((ResultCode = 0) or (ResultCode = 3010)) and IsUsbipdInstalled() then
-        Exit;
-    end;
-  end;
-
-  if not IsUsbipdInstalled() then
-  begin
-    MsgBox(ExpandConstant('{cm:UsbipdInstallFailed}'), mbInformation, MB_OK);
-  end;
+  MsgBox(ExpandConstant('{cm:UsbipdInstallFailed}'), mbInformation, MB_OK);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -265,7 +339,26 @@ begin
 
   if CurStep = ssPostInstall then
   begin
-    TryProvisionSharedFolderPrincipal;
     TryInstallUsbipdFromInternet;
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if (CurUninstallStep = usAppMutexCheck) and (not UninstallOptionsPrompted) then
+  begin
+    CloseRunningHostApp;
+    UninstallOptionsPrompted := True;
+    PromptUninstallOptions;
+  end;
+
+  if (CurUninstallStep = usUninstall) and (not OptionalDepsUninstallExecuted) then
+  begin
+    OptionalDepsUninstallExecuted := True;
+
+    if ShouldRemoveUsbipdOnUninstall() then
+    begin
+      TryUninstallByDisplayName('usbipd-win');
+    end;
   end;
 end;

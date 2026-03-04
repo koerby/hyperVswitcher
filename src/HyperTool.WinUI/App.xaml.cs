@@ -35,8 +35,8 @@ public sealed partial class App : Application
         (HyperVSocketUsbTunnelDefaults.ServiceIdString, "HyperTool Hyper-V Socket USB Tunnel"),
         (HyperVSocketUsbTunnelDefaults.DiagnosticsServiceIdString, "HyperTool Hyper-V Socket Diagnostics"),
         (HyperVSocketUsbTunnelDefaults.SharedFolderCatalogServiceIdString, "HyperTool Hyper-V Socket Shared Folder Catalog"),
-        (HyperVSocketUsbTunnelDefaults.SharedFolderCredentialServiceIdString, "HyperTool Hyper-V Socket Shared Folder Credential"),
-        (HyperVSocketUsbTunnelDefaults.HostIdentityServiceIdString, "HyperTool Hyper-V Socket Host Identity")
+        (HyperVSocketUsbTunnelDefaults.HostIdentityServiceIdString, "HyperTool Hyper-V Socket Host Identity"),
+        (HyperVSocketUsbTunnelDefaults.FileServiceIdString, "HyperTool Hyper-V Socket File Service")
     ];
 
     private ITrayService? _trayService;
@@ -53,8 +53,8 @@ public sealed partial class App : Application
     private HyperVSocketUsbHostTunnel? _usbHostTunnel;
     private HyperVSocketDiagnosticsHostListener? _usbDiagnosticsHostListener;
     private HyperVSocketSharedFolderCatalogHostListener? _sharedFolderCatalogHostListener;
-    private HyperVSocketSharedFolderCredentialHostListener? _sharedFolderCredentialHostListener;
     private HyperVSocketHostIdentityHostListener? _hostIdentityHostListener;
+    private HyperVSocketFileHostListener? _fileHostListener;
     private CancellationTokenSource? _usbDiagnosticsCts;
     private Task? _usbDiagnosticsTask;
     private CancellationTokenSource? _usbHostDiscoveryCts;
@@ -64,9 +64,8 @@ public sealed partial class App : Application
     private CancellationTokenSource? _usbEventRefreshCts;
     private string _lastMissingHyperVSocketServicesLogKey = string.Empty;
     private bool _hyperVSocketRegistrationPromptIssued;
-    private bool _sharedFolderCredentialProvisioningPromptIssued;
-    private bool _sharedFolderCredentialSocketActive;
-    private DateTimeOffset? _sharedFolderCredentialSocketLastSyncUtc;
+    private bool _sharedFolderFileServiceSocketActive;
+    private DateTimeOffset? _sharedFolderFileServiceLastActivityUtc;
 
     private MainWindow? _mainWindow;
     private MainViewModel? _mainViewModel;
@@ -76,14 +75,6 @@ public sealed partial class App : Application
     private Mutex? _singleInstanceMutex;
     private CancellationTokenSource? _singleInstanceServerCts;
     private Task? _singleInstanceServerTask;
-
-    private sealed class SharedFolderElevatedRequest
-    {
-        public string Action { get; set; } = string.Empty;
-        public string ShareName { get; set; } = string.Empty;
-        public string LocalPath { get; set; } = string.Empty;
-        public bool ReadOnly { get; set; }
-    }
 
     public App()
     {
@@ -139,19 +130,6 @@ public sealed partial class App : Application
             return;
         }
 
-        if (args.Arguments?.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Any(arg => string.Equals(arg, "--provision-sharedfolder-credential", StringComparison.OrdinalIgnoreCase)) == true)
-        {
-            RunProvisionSharedFolderCredentialHelperMode();
-            return;
-        }
-
-        if (TryGetLaunchArgumentValue(args.Arguments, "--sharedfolder-payload", out var sharedFolderPayload))
-        {
-            RunSharedFolderActionHelperMode(sharedFolderPayload);
-            return;
-        }
-
         if (!TryInitializeSingleInstance())
         {
             Current.Exit();
@@ -166,7 +144,6 @@ public sealed partial class App : Application
             Log.Information("Logging initialized at {LogPath}", logPath);
 
             EnsureHyperVSocketServiceRegistrationsAtStartup();
-            EnsureSharedFolderCredentialProvisionedAtStartup();
 
             try
             {
@@ -244,12 +221,12 @@ public sealed partial class App : Application
                 uiInteropService);
 
             StartSharedFolderCatalogListenerWithRecovery();
-            StartSharedFolderCredentialListenerWithRecovery();
             StartHostIdentityListenerWithRecovery();
+            StartFileHostListenerWithRecovery();
 
             _mainWindow = new MainWindow(_themeService, _mainViewModel, showStartupSplash: true);
             AttachMainWindowHandlers(_mainWindow);
-            UpdateSharedFolderCredentialSocketStatusPanel();
+            UpdateSharedFolderFileServiceStatusPanel();
             StartUsbDiagnosticsLoop();
             StartUsbHostDiscoveryResponder();
             StartUsbAutoRefreshLoop();
@@ -337,12 +314,13 @@ public sealed partial class App : Application
             _usbHostTunnel = null;
             _sharedFolderCatalogHostListener?.Dispose();
             _sharedFolderCatalogHostListener = null;
-            _sharedFolderCredentialHostListener?.Dispose();
-            _sharedFolderCredentialHostListener = null;
-            _sharedFolderCredentialSocketActive = false;
-            UpdateSharedFolderCredentialSocketStatusPanel();
             _hostIdentityHostListener?.Dispose();
             _hostIdentityHostListener = null;
+            _fileHostListener?.Dispose();
+            _fileHostListener = null;
+            _sharedFolderFileServiceSocketActive = false;
+            _sharedFolderFileServiceLastActivityUtc = null;
+            UpdateSharedFolderFileServiceStatusPanel();
             ShutdownSingleInstanceInfrastructure();
             Log.Information("HyperTool exited.");
             Log.CloseAndFlush();
@@ -397,12 +375,13 @@ public sealed partial class App : Application
             _usbHostTunnel = null;
             _sharedFolderCatalogHostListener?.Dispose();
             _sharedFolderCatalogHostListener = null;
-            _sharedFolderCredentialHostListener?.Dispose();
-            _sharedFolderCredentialHostListener = null;
-            _sharedFolderCredentialSocketActive = false;
-            UpdateSharedFolderCredentialSocketStatusPanel();
             _hostIdentityHostListener?.Dispose();
             _hostIdentityHostListener = null;
+            _fileHostListener?.Dispose();
+            _fileHostListener = null;
+            _sharedFolderFileServiceSocketActive = false;
+            _sharedFolderFileServiceLastActivityUtc = null;
+            UpdateSharedFolderFileServiceStatusPanel();
 
             _themeService.ApplyTheme(_mainViewModel.UiTheme);
 
@@ -444,8 +423,8 @@ public sealed partial class App : Application
             }
 
             StartSharedFolderCatalogListenerWithRecovery(isThemeRestart: true);
-            StartSharedFolderCredentialListenerWithRecovery(isThemeRestart: true);
             StartHostIdentityListenerWithRecovery(isThemeRestart: true);
+            StartFileHostListenerWithRecovery(isThemeRestart: true);
 
             try
             {
@@ -1149,7 +1128,8 @@ public sealed partial class App : Application
             .WriteTo.File(
                 logFilePath,
                 rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: 14)
+                retainedFileCountLimit: 14,
+                encoding: new UTF8Encoding(encoderShouldEmitUTF8Identifier: true))
             .CreateLogger();
 
         return logFilePath;
@@ -1546,101 +1526,6 @@ public sealed partial class App : Application
         Microsoft.UI.Xaml.Application.Current.Exit();
     }
 
-    private void RunProvisionSharedFolderCredentialHelperMode()
-    {
-        try
-        {
-            InitializeLogging();
-        }
-        catch
-        {
-        }
-
-        var (success, message) = ExecuteSharedFolderCredentialProvisioning();
-        if (!success)
-        {
-            Log.Error("Shared-folder credential provisioning failed: {Message}", message);
-        }
-
-        Environment.ExitCode = success ? 0 : 1;
-        Microsoft.UI.Xaml.Application.Current.Exit();
-    }
-
-    private void RunSharedFolderActionHelperMode(string payloadBase64)
-    {
-        try
-        {
-            InitializeLogging();
-        }
-        catch
-        {
-        }
-
-        var (success, message) = ExecuteSharedFolderAction(payloadBase64);
-        if (!success)
-        {
-            Log.Error("Shared-folder elevated action failed: {Message}", message);
-        }
-
-        Environment.ExitCode = success ? 0 : 1;
-        Microsoft.UI.Xaml.Application.Current.Exit();
-    }
-
-    private static (bool Success, string Message) ExecuteSharedFolderAction(string payloadBase64)
-    {
-        try
-        {
-            var (registrationSuccess, registrationMessage) = ExecuteSharedFolderSocketRegistration();
-            if (!registrationSuccess)
-            {
-                return (false, $"Socket-Registrierung fehlgeschlagen: {registrationMessage}");
-            }
-
-            if (string.IsNullOrWhiteSpace(payloadBase64))
-            {
-                return (false, "Payload fehlt.");
-            }
-
-            var payloadJson = Encoding.UTF8.GetString(Convert.FromBase64String(payloadBase64.Trim()));
-            var request = JsonSerializer.Deserialize<SharedFolderElevatedRequest>(payloadJson);
-            if (request is null)
-            {
-                return (false, "Payload konnte nicht gelesen werden.");
-            }
-
-            var action = (request.Action ?? string.Empty).Trim().ToLowerInvariant();
-            var service = new HostSharedFolderService();
-
-            if (action == "ensure")
-            {
-                var definition = new HyperTool.Models.HostSharedFolderDefinition
-                {
-                    ShareName = (request.ShareName ?? string.Empty).Trim(),
-                    LocalPath = (request.LocalPath ?? string.Empty).Trim(),
-                    ReadOnly = request.ReadOnly,
-                    Enabled = true,
-                    Label = (request.ShareName ?? string.Empty).Trim()
-                };
-
-                service.EnsureShareAsync(definition, CancellationToken.None).GetAwaiter().GetResult();
-                return (true, "OK");
-            }
-
-            if (action == "remove")
-            {
-                var shareName = (request.ShareName ?? string.Empty).Trim();
-                service.RemoveShareAsync(shareName, CancellationToken.None).GetAwaiter().GetResult();
-                return (true, "OK");
-            }
-
-            return (false, $"Unbekannte Aktion: {request.Action}");
-        }
-        catch (Exception ex)
-        {
-            return (false, ex.Message);
-        }
-    }
-
     private static bool TryGetLaunchArgumentValue(string? rawArguments, string key, out string value)
     {
         value = string.Empty;
@@ -1700,27 +1585,6 @@ public sealed partial class App : Application
         }
     }
 
-    private static (bool Success, string Message) ExecuteSharedFolderCredentialProvisioning()
-    {
-        try
-        {
-            var service = new HostSharedFolderCredentialProvisioningService();
-            var credential = service.EnsureProvisionedAsync(CancellationToken.None).GetAwaiter().GetResult();
-            if (string.IsNullOrWhiteSpace(credential.Username)
-                || string.IsNullOrWhiteSpace(credential.Password)
-                || string.IsNullOrWhiteSpace(credential.GroupName))
-            {
-                return (false, "Provisionierung lieferte unvollständige SharedFolder-Credentials.");
-            }
-
-            return (true, "OK");
-        }
-        catch (Exception ex)
-        {
-            return (false, ex.Message);
-        }
-    }
-
     private void EnsureHyperVSocketServiceRegistrationsAtStartup()
     {
         var missingServiceIds = GetMissingHyperVSocketServiceIds();
@@ -1746,104 +1610,6 @@ public sealed partial class App : Application
         }
 
         Log.Warning("Hyper-V socket registry entries are still missing after elevated helper: {ServiceIds}", string.Join(", ", remainingMissing));
-    }
-
-    private void EnsureSharedFolderCredentialProvisionedAtStartup()
-    {
-        var service = new HostSharedFolderCredentialProvisioningService();
-        if (service.TryGetCredential(out var existing)
-            && !string.IsNullOrWhiteSpace(existing.Username)
-            && !string.IsNullOrWhiteSpace(existing.Password)
-            && !string.IsNullOrWhiteSpace(existing.GroupName))
-        {
-            Log.Information("Shared-folder guest credential already provisioned. User={User}; Group={Group}", existing.Username, existing.GroupName);
-            return;
-        }
-
-        Log.Warning("Shared-folder guest credential is missing at startup. Provisioning is deferred to manual action (Shared Folder > Provisionierung erneut ausführen).");
-    }
-
-    private bool TryProvisionSharedFolderCredentialElevated(bool allowPrompt = true)
-    {
-        if (TryProvisionSharedFolderCredentialWithoutPrompt())
-        {
-            return true;
-        }
-
-        if (!allowPrompt)
-        {
-            Log.Information("Skipping elevated shared-folder credential provisioning prompt (prompt disabled for current flow).");
-            return false;
-        }
-
-        if (_sharedFolderCredentialProvisioningPromptIssued)
-        {
-            Log.Information("Skipping additional elevated shared-folder credential provisioning prompt (already attempted in this app session).");
-            return false;
-        }
-
-        _sharedFolderCredentialProvisioningPromptIssued = true;
-
-        var exePath = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(exePath))
-        {
-            Log.Warning("Could not start elevated shared-folder credential provisioning helper because executable path is unknown.");
-            return false;
-        }
-
-        try
-        {
-            using var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = exePath,
-                Arguments = "--provision-sharedfolder-credential",
-                UseShellExecute = true,
-                Verb = "runas"
-            });
-
-            if (process is null)
-            {
-                Log.Warning("Elevated shared-folder credential provisioning helper could not be started.");
-                return false;
-            }
-
-            process.WaitForExit();
-            if (process.ExitCode == 0)
-            {
-                return true;
-            }
-
-            Log.Warning("Elevated shared-folder credential provisioning helper exited with code {ExitCode}.", process.ExitCode);
-            return false;
-        }
-        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
-        {
-            Log.Warning("UAC prompt for shared-folder credential provisioning was cancelled.");
-            return false;
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "Failed to start elevated shared-folder credential provisioning helper.");
-            return false;
-        }
-    }
-
-    private bool TryProvisionSharedFolderCredentialWithoutPrompt()
-    {
-        if (!IsRunningAsAdministrator())
-        {
-            return false;
-        }
-
-        var (success, message) = ExecuteSharedFolderCredentialProvisioning();
-        if (!success)
-        {
-            Log.Warning("Silent shared-folder credential provisioning failed: {Message}", message);
-            return false;
-        }
-
-        Log.Information("Silent shared-folder credential provisioning completed (process already elevated).");
-        return true;
     }
 
     private bool TryRegisterSharedFolderSocketServiceWithoutPrompt()
@@ -1948,7 +1714,12 @@ public sealed partial class App : Application
     {
         try
         {
-            _hostIdentityHostListener = new HyperVSocketHostIdentityHostListener();
+            _hostIdentityHostListener = new HyperVSocketHostIdentityHostListener(
+                featureAvailabilityProvider: () => new HyperTool.Models.HostFeatureAvailability
+                {
+                    UsbSharingEnabled = _mainViewModel?.HostUsbSharingEnabled ?? true,
+                    SharedFoldersEnabled = _mainViewModel?.HostSharedFoldersEnabled ?? true
+                });
             _hostIdentityHostListener.Start();
             Log.Information(isThemeRestart
                 ? "Hyper-V socket host-identity listener restarted after theme change."
@@ -1977,7 +1748,12 @@ public sealed partial class App : Application
 
         try
         {
-            _hostIdentityHostListener = new HyperVSocketHostIdentityHostListener();
+            _hostIdentityHostListener = new HyperVSocketHostIdentityHostListener(
+                featureAvailabilityProvider: () => new HyperTool.Models.HostFeatureAvailability
+                {
+                    UsbSharingEnabled = _mainViewModel?.HostUsbSharingEnabled ?? true,
+                    SharedFoldersEnabled = _mainViewModel?.HostSharedFoldersEnabled ?? true
+                });
             _hostIdentityHostListener.Start();
             Log.Information("Hyper-V socket host-identity listener started after elevated registration helper.");
         }
@@ -1989,29 +1765,35 @@ public sealed partial class App : Application
         }
     }
 
-    private void StartSharedFolderCredentialListenerWithRecovery(bool isThemeRestart = false)
+    private void StartFileHostListenerWithRecovery(bool isThemeRestart = false)
     {
+        if (_mainViewModel is null)
+        {
+            return;
+        }
+
         try
         {
-            _sharedFolderCredentialHostListener = new HyperVSocketSharedFolderCredentialHostListener(
-                onCredentialServed: OnSharedFolderCredentialServed);
-            _sharedFolderCredentialHostListener.Start();
-            _sharedFolderCredentialSocketActive = true;
-            UpdateSharedFolderCredentialSocketStatusPanel();
+            _fileHostListener = new HyperVSocketFileHostListener(
+                () => _mainViewModel.GetHostSharedFoldersSnapshot(),
+                onRequestServed: OnSharedFolderFileServiceRequestServed);
+            _fileHostListener.Start();
+            _sharedFolderFileServiceSocketActive = true;
+            UpdateSharedFolderFileServiceStatusPanel();
             Log.Information(isThemeRestart
-                ? "Hyper-V socket shared-folder credential listener restarted after theme change."
-                : "Hyper-V socket shared-folder credential listener started.");
+                ? "Hyper-V socket file listener restarted after theme change."
+                : "Hyper-V socket file listener started.");
             return;
         }
         catch (Exception ex)
         {
-            _sharedFolderCredentialHostListener?.Dispose();
-            _sharedFolderCredentialHostListener = null;
-            _sharedFolderCredentialSocketActive = false;
-            UpdateSharedFolderCredentialSocketStatusPanel();
+            _fileHostListener?.Dispose();
+            _fileHostListener = null;
+            _sharedFolderFileServiceSocketActive = false;
+            UpdateSharedFolderFileServiceStatusPanel();
             Log.Warning(ex, isThemeRestart
-                ? "Hyper-V socket shared-folder credential listener could not be restarted after theme change."
-                : "Hyper-V socket shared-folder credential listener could not be started.");
+                ? "Hyper-V socket file listener could not be restarted after theme change."
+                : "Hyper-V socket file listener could not be started.");
 
             if (!IsMissingSharedFolderSocketRegistration(ex))
             {
@@ -2021,46 +1803,47 @@ public sealed partial class App : Application
 
         if (!TryRegisterSharedFolderSocketServiceElevated(allowPrompt: false))
         {
-            _sharedFolderCredentialSocketActive = false;
-            UpdateSharedFolderCredentialSocketStatusPanel();
-            Log.Information("Hyper-V socket shared-folder credential listener remains disabled until registry entries exist (startup prompt disabled).");
+            _sharedFolderFileServiceSocketActive = false;
+            UpdateSharedFolderFileServiceStatusPanel();
+            Log.Information("Hyper-V socket file listener remains disabled until registry entries exist (startup prompt disabled).");
             return;
         }
 
         try
         {
-            _sharedFolderCredentialHostListener = new HyperVSocketSharedFolderCredentialHostListener(
-                onCredentialServed: OnSharedFolderCredentialServed);
-            _sharedFolderCredentialHostListener.Start();
-            _sharedFolderCredentialSocketActive = true;
-            UpdateSharedFolderCredentialSocketStatusPanel();
-            Log.Information("Hyper-V socket shared-folder credential listener started after registration helper.");
+            _fileHostListener = new HyperVSocketFileHostListener(
+                () => _mainViewModel.GetHostSharedFoldersSnapshot(),
+                onRequestServed: OnSharedFolderFileServiceRequestServed);
+            _fileHostListener.Start();
+            _sharedFolderFileServiceSocketActive = true;
+            UpdateSharedFolderFileServiceStatusPanel();
+            Log.Information("Hyper-V socket file listener started after elevated registration helper.");
         }
         catch (Exception ex)
         {
-            _sharedFolderCredentialHostListener?.Dispose();
-            _sharedFolderCredentialHostListener = null;
-            _sharedFolderCredentialSocketActive = false;
-            UpdateSharedFolderCredentialSocketStatusPanel();
-            Log.Warning(ex, "Hyper-V socket shared-folder credential listener still unavailable after registration helper.");
+            _fileHostListener?.Dispose();
+            _fileHostListener = null;
+            _sharedFolderFileServiceSocketActive = false;
+            UpdateSharedFolderFileServiceStatusPanel();
+            Log.Warning(ex, "Hyper-V socket file listener still unavailable after elevated registration helper.");
         }
     }
 
-    private void OnSharedFolderCredentialServed(DateTimeOffset servedAtUtc)
+    private void OnSharedFolderFileServiceRequestServed(DateTimeOffset servedAtUtc)
     {
-        _sharedFolderCredentialSocketLastSyncUtc = servedAtUtc;
-        _sharedFolderCredentialSocketActive = _sharedFolderCredentialHostListener?.IsRunning == true;
-        UpdateSharedFolderCredentialSocketStatusPanel();
+        _sharedFolderFileServiceLastActivityUtc = servedAtUtc;
+        _sharedFolderFileServiceSocketActive = _fileHostListener?.IsRunning == true;
+        UpdateSharedFolderFileServiceStatusPanel();
     }
 
-    private void UpdateSharedFolderCredentialSocketStatusPanel()
+    private void UpdateSharedFolderFileServiceStatusPanel()
     {
-        var socketActive = _sharedFolderCredentialSocketActive;
-        var lastSyncUtc = _sharedFolderCredentialSocketLastSyncUtc;
+        var socketActive = _sharedFolderFileServiceSocketActive;
+        var lastActivityUtc = _sharedFolderFileServiceLastActivityUtc;
 
         void apply()
         {
-            _mainWindow?.UpdateSharedFolderCredentialSocketStatus(socketActive, lastSyncUtc);
+            _mainWindow?.UpdateSharedFolderFileServiceStatus(socketActive, lastActivityUtc);
         }
 
         if (_mainWindow?.DispatcherQueue is { } queue && !queue.HasThreadAccess)
