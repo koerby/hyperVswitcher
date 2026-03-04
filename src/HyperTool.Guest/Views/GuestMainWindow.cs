@@ -53,6 +53,7 @@ internal sealed class GuestMainWindow : Window
     private readonly Func<string, Task<int>> _disconnectUsbAsync;
     private readonly Func<GuestConfig, Task> _saveConfigAsync;
     private readonly Func<string, Task> _restartForThemeChangeAsync;
+    private readonly Func<Task> _exitForUpdateInstallAsync;
     private readonly Func<Task<(bool hyperVSocketActive, bool registryServiceOk)>> _runTransportDiagnosticsTestAsync;
     private readonly Func<Task<string?>> _discoverUsbHostAddressAsync;
     private readonly Func<Task<IReadOnlyList<HostSharedFolderDefinition>>> _fetchHostSharedFoldersAsync;
@@ -266,6 +267,7 @@ internal sealed class GuestMainWindow : Window
         Func<string, Task<int>> disconnectUsbAsync,
         Func<GuestConfig, Task> saveConfigAsync,
         Func<string, Task> restartForThemeChangeAsync,
+        Func<Task> exitForUpdateInstallAsync,
         Func<Task<(bool hyperVSocketActive, bool registryServiceOk)>> runTransportDiagnosticsTestAsync,
         Func<Task<string?>> discoverUsbHostAddressAsync,
         Func<Task<IReadOnlyList<HostSharedFolderDefinition>>> fetchHostSharedFoldersAsync,
@@ -277,6 +279,7 @@ internal sealed class GuestMainWindow : Window
         _disconnectUsbAsync = disconnectUsbAsync;
         _saveConfigAsync = saveConfigAsync;
         _restartForThemeChangeAsync = restartForThemeChangeAsync;
+        _exitForUpdateInstallAsync = exitForUpdateInstallAsync;
         _runTransportDiagnosticsTestAsync = runTransportDiagnosticsTestAsync;
         _discoverUsbHostAddressAsync = discoverUsbHostAddressAsync;
         _fetchHostSharedFoldersAsync = fetchHostSharedFoldersAsync;
@@ -4251,17 +4254,54 @@ internal sealed class GuestMainWindow : Window
 
             AppendNotification($"[Info] Installer gespeichert: {installerPath}");
 
-            Process.Start(new ProcessStartInfo
+            if (!StartInstallerDetached(installerPath))
             {
-                FileName = installerPath,
-                UseShellExecute = true
-            });
+                throw new InvalidOperationException("Installer konnte nicht gestartet werden.");
+            }
 
-            AppendNotification("[Info] Installer gestartet.");
+            AppendNotification("[Info] Installer gestartet. HyperTool Guest wird jetzt beendet.");
+            await Task.Delay(500);
+            await _exitForUpdateInstallAsync();
         }
         catch (Exception ex)
         {
             AppendNotification($"[Error] Update-Installation fehlgeschlagen: {ex.Message}");
+        }
+    }
+
+    private static bool StartInstallerDetached(string installerPath)
+    {
+        if (string.IsNullOrWhiteSpace(installerPath) || !File.Exists(installerPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c start \"\" \"{installerPath}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            });
+            return true;
+        }
+        catch
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = installerPath,
+                    UseShellExecute = true
+                });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 

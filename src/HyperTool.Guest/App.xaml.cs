@@ -197,6 +197,7 @@ public sealed partial class App : Application
             DisconnectUsbAsync,
             SaveConfigAsync,
             RestartForThemeChangeAsync,
+            ExitForUpdateInstallAsync,
             RunTransportDiagnosticsTestAsync,
             DiscoverUsbHostAddressAsync,
             FetchHostSharedFoldersAsync,
@@ -314,6 +315,11 @@ public sealed partial class App : Application
         {
             GuestLogger.Warn("startup.updatecheck_failed", ex.Message);
         }
+    }
+
+    private async Task ExitForUpdateInstallAsync()
+    {
+        await ExitWithAnimationAsync(showExitScreen: false);
     }
 
     private void ApplyStartWithWindows(GuestConfig config)
@@ -498,6 +504,7 @@ public sealed partial class App : Application
                 DisconnectUsbAsync,
                 SaveConfigAsync,
                 RestartForThemeChangeAsync,
+                ExitForUpdateInstallAsync,
                 RunTransportDiagnosticsTestAsync,
                 DiscoverUsbHostAddressAsync,
                 FetchHostSharedFoldersAsync,
