@@ -91,6 +91,15 @@ public partial class MainViewModel : ViewModelBase
     private string _newVmLabel = string.Empty;
 
     [ObservableProperty]
+    private string _importVmRequestedName = string.Empty;
+
+    [ObservableProperty]
+    private string _importVmRequestedFolderName = string.Empty;
+
+    [ObservableProperty]
+    private VmImportModeOption? _selectedVmImportModeOption;
+
+    [ObservableProperty]
     private bool _hnsEnabled;
 
     [ObservableProperty]
@@ -181,6 +190,12 @@ public partial class MainViewModel : ViewModelBase
     private bool _hostUsbSharingEnabled = true;
 
     [ObservableProperty]
+    private bool _usbAutoDetachOnClientDisconnect = true;
+
+    [ObservableProperty]
+    private bool _usbUnshareOnExit = true;
+
+    [ObservableProperty]
     private bool _usbRuntimeAvailable = true;
 
     [ObservableProperty]
@@ -220,6 +235,13 @@ public partial class MainViewModel : ViewModelBase
     public ObservableCollection<UsbIpDeviceInfo> UsbDevices { get; } = [];
 
     public ObservableCollection<HostSharedFolderDefinition> HostSharedFolders { get; } = [];
+
+    public IReadOnlyList<VmImportModeOption> VmImportModeOptions { get; } =
+    [
+        new() { Key = "copy", Label = "Kopieren (neue VM-ID)", Description = "Kopie am Ziel anlegen, neue VM-ID erzeugen." },
+        new() { Key = "register", Label = "Direkt registrieren", Description = "VM am aktuellen Speicherort registrieren." },
+        new() { Key = "restore", Label = "Wiederherstellen", Description = "Import ohne Kopie mit bestehender VM-ID." }
+    ];
 
     public string DefaultSwitchName { get; }
 
@@ -409,6 +431,7 @@ public partial class MainViewModel : ViewModelBase
         _updateService = updateService;
         _usbIpService = usbIpService;
         _uiInteropService = uiInteropService;
+        SelectedVmImportModeOption = VmImportModeOptions.FirstOrDefault();
         _configPath = configResult.ConfigPath;
 
         _configChangeSuppressionDepth++;
@@ -433,6 +456,8 @@ public partial class MainViewModel : ViewModelBase
         GithubOwner = configResult.Config.Update.GitHubOwner;
         GithubRepo = configResult.Config.Update.GitHubRepo;
         HostUsbSharingEnabled = configResult.Config.Usb.Enabled;
+        UsbAutoDetachOnClientDisconnect = configResult.Config.Usb.AutoDetachOnClientDisconnect;
+        UsbUnshareOnExit = configResult.Config.Usb.UnshareOnExit;
         HostSharedFoldersEnabled = configResult.Config.SharedFolders.Enabled;
         _usbAutoShareDeviceKeys.Clear();
         foreach (var key in configResult.Config.Usb.AutoShareDeviceKeys)
@@ -681,6 +706,10 @@ public partial class MainViewModel : ViewModelBase
         MarkConfigDirty();
         NotifyTrayStateChanged();
     }
+
+    partial void OnUsbAutoDetachOnClientDisconnectChanged(bool value) => MarkConfigDirty();
+
+    partial void OnUsbUnshareOnExitChanged(bool value) => MarkConfigDirty();
 
     partial void OnHostSharedFoldersEnabledChanged(bool value)
     {
@@ -1379,16 +1408,51 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        var hasReliableProgress = false;
         var progress = new Progress<int>(percent =>
         {
-            BusyProgressPercent = percent;
-            BusyText = $"VM wird importiert... {percent}%";
+            var clampedPercent = Math.Clamp(percent, 0, 100);
+
+            if (!hasReliableProgress)
+            {
+                if (clampedPercent < 2)
+                {
+                    BusyProgressPercent = -1;
+                    BusyText = "VM wird importiert... (Fortschritt wird von Hyper-V ermittelt)";
+                    return;
+                }
+
+                hasReliableProgress = true;
+            }
+
+            BusyProgressPercent = clampedPercent;
+            BusyText = $"VM wird importiert... {clampedPercent}%";
         });
+
+        var importMode = (SelectedVmImportModeOption?.Key ?? "copy").Trim();
+        var requestedVmName = string.IsNullOrWhiteSpace(ImportVmRequestedName) ? null : ImportVmRequestedName.Trim();
+        var requestedFolderName = string.IsNullOrWhiteSpace(ImportVmRequestedFolderName) ? null : ImportVmRequestedFolderName.Trim();
 
         await ExecuteBusyActionAsync("VM wird importiert...", async token =>
         {
-            var importResult = await _hyperVService.ImportVmAsync(importPath, destinationPath, progress, token);
-            AddNotification($"VM '{importResult.VmName}' erfolgreich als neue VM importiert (Ziel: {destinationPath}).", "Success");
+            BusyProgressPercent = -1;
+            BusyText = "VM wird importiert... (Fortschritt wird von Hyper-V ermittelt)";
+
+            var importResult = await _hyperVService.ImportVmAsync(
+                importPath,
+                destinationPath,
+                requestedVmName,
+                requestedFolderName,
+                importMode,
+                progress,
+                token);
+
+            var modeLabel = SelectedVmImportModeOption?.Label ?? importResult.ImportMode;
+            var destinationInfo = string.IsNullOrWhiteSpace(importResult.DestinationFolderPath)
+                ? destinationPath
+                : importResult.DestinationFolderPath;
+
+            AddNotification($"VM '{importResult.VmName}' importiert ({modeLabel}) · Ziel: {destinationInfo}", "Success");
 
             if (importResult.RenamedDueToConflict
                 && !string.Equals(importResult.OriginalName, importResult.VmName, StringComparison.OrdinalIgnoreCase))
@@ -1481,7 +1545,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 devices = await _usbIpService.GetDevicesAsync(token);
 
-                var canApplyAutoShareNow = applyAutoShare && (useBusyIndicator || IsProcessElevated());
+                var canApplyAutoShareNow = applyAutoShare;
 
                 var autoShareCandidates = canApplyAutoShareNow
                     ? devices
@@ -2643,6 +2707,8 @@ public partial class MainViewModel : ViewModelBase
                 Usb = new UsbSettings
                 {
                     Enabled = HostUsbSharingEnabled,
+                    AutoDetachOnClientDisconnect = UsbAutoDetachOnClientDisconnect,
+                    UnshareOnExit = UsbUnshareOnExit,
                     AutoShareDeviceKeys = _usbAutoShareDeviceKeys
                         .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
                         .ToList()
@@ -2905,7 +2971,9 @@ public partial class MainViewModel : ViewModelBase
     public async Task HandleUsbClientDisconnectedAsync(string busId)
     {
         var normalizedBusId = (busId ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(normalizedBusId) || !HostUsbSharingEnabled)
+        if (string.IsNullOrWhiteSpace(normalizedBusId)
+            || !HostUsbSharingEnabled
+            || !UsbAutoDetachOnClientDisconnect)
         {
             return;
         }
@@ -3586,6 +3654,7 @@ public partial class MainViewModel : ViewModelBase
 
         if (result == UnsavedConfigPromptResult.No)
         {
+            ReloadConfigSnapshotWithoutRuntimeRefresh();
             return true;
         }
 
@@ -3601,6 +3670,77 @@ public partial class MainViewModel : ViewModelBase
         }
 
         HasPendingConfigChanges = true;
+    }
+
+    private void ReloadConfigSnapshotWithoutRuntimeRefresh()
+    {
+        var configResult = _configService.LoadOrCreate(_configPath);
+        var config = configResult.Config;
+        var previousSelectionName = SelectedVm?.Name;
+
+        _configChangeSuppressionDepth++;
+        try
+        {
+            WindowTitle = "HyperTool";
+            ConfigurationNotice = configResult.Notice;
+            HnsEnabled = config.Hns.Enabled;
+            HnsAutoRestartAfterDefaultSwitch = config.Hns.AutoRestartAfterDefaultSwitch;
+            HnsAutoRestartAfterAnyConnect = config.Hns.AutoRestartAfterAnyConnect;
+            DefaultVmName = config.DefaultVmName;
+            LastSelectedVmName = config.LastSelectedVmName;
+            VmConnectComputerName = NormalizeVmConnectComputerName(config.VmConnectComputerName);
+            UiEnableTrayIcon = true;
+            UiEnableTrayMenu = config.Ui.EnableTrayMenu;
+            UiStartMinimized = config.Ui.StartMinimized;
+            UiStartWithWindows = config.Ui.StartWithWindows;
+            UiOpenConsoleAfterVmStart = config.Ui.OpenConsoleAfterVmStart;
+            UiOpenVmConnectWithSessionEdit = config.Ui.OpenVmConnectWithSessionEdit;
+            UiTheme = NormalizeUiTheme(config.Ui.Theme);
+            ApplyConfiguredVmDefinitions(config.Vms);
+            _trayVmNames = NormalizeTrayVmNames(config.Ui.TrayVmNames);
+            UpdateCheckOnStartup = config.Update.CheckOnStartup;
+            GithubOwner = config.Update.GitHubOwner;
+            GithubRepo = config.Update.GitHubRepo;
+            HostUsbSharingEnabled = config.Usb.Enabled;
+            UsbAutoDetachOnClientDisconnect = config.Usb.AutoDetachOnClientDisconnect;
+            UsbUnshareOnExit = config.Usb.UnshareOnExit;
+            HostSharedFoldersEnabled = config.SharedFolders.Enabled;
+
+            _usbAutoShareDeviceKeys.Clear();
+            foreach (var key in config.Usb.AutoShareDeviceKeys)
+            {
+                if (!string.IsNullOrWhiteSpace(key))
+                {
+                    _usbAutoShareDeviceKeys.Add(key.Trim());
+                }
+            }
+
+            ApplyConfiguredSharedFolders(config.SharedFolders.HostDefinitions);
+
+            _suppressUsbAutoShareToggleHandling = true;
+            try
+            {
+                SelectedUsbDeviceAutoShareEnabled = SelectedUsbDevice is not null
+                    && _usbAutoShareDeviceKeys.Contains(BuildUsbAutoShareKey(SelectedUsbDevice));
+            }
+            finally
+            {
+                _suppressUsbAutoShareToggleHandling = false;
+            }
+        }
+        finally
+        {
+            _configChangeSuppressionDepth--;
+        }
+
+        if (string.IsNullOrWhiteSpace(LastSelectedVmName) && !string.IsNullOrWhiteSpace(previousSelectionName))
+        {
+            LastSelectedVmName = previousSelectionName;
+        }
+
+        MarkConfigClean();
+        NotifyTrayStateChanged();
+        AddNotification("Konfiguration neu geladen.", "Info");
     }
 
     private void MarkConfigClean()

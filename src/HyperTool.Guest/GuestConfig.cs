@@ -49,6 +49,8 @@ internal sealed class GuestUsbSettings
 {
     public bool Enabled { get; set; } = true;
 
+    public bool DisconnectOnExit { get; set; } = true;
+
     public string HostAddress { get; set; } = string.Empty;
 
     public string HostName { get; set; } = string.Empty;
@@ -204,17 +206,17 @@ internal static class GuestConfigService
     };
 
     public static readonly string DefaultConfigPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "HyperTool",
         "HyperTool.Guest.json");
 
     public static readonly string DefaultLogDirectory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "HyperTool",
         "logs");
 
     public static readonly string DefaultHandshakePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "HyperTool",
         "HyperTool.Guest.handshake.json");
 

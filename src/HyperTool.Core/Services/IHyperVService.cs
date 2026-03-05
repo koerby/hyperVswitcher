@@ -44,5 +44,12 @@ public interface IHyperVService
 
     Task ExportVmAsync(string vmName, string destinationPath, IProgress<int>? progress, CancellationToken cancellationToken);
 
-    Task<ImportVmResult> ImportVmAsync(string importPath, string destinationPath, IProgress<int>? progress, CancellationToken cancellationToken);
+    Task<ImportVmResult> ImportVmAsync(
+        string importPath,
+        string destinationPath,
+        string? requestedVmName,
+        string? requestedFolderName,
+        string importMode,
+        IProgress<int>? progress,
+        CancellationToken cancellationToken);
 }

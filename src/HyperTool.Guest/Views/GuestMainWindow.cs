@@ -24,6 +24,8 @@ namespace HyperTool.Guest.Views;
 
 internal sealed class GuestMainWindow : Window
 {
+    private const int SettingsMenuIndex = 2;
+
     private enum UsbHostSearchStatusKind
     {
         Neutral,
@@ -32,7 +34,7 @@ internal sealed class GuestMainWindow : Window
         Error
     }
 
-    public const int DefaultWindowWidth = 1052;
+    public const int DefaultWindowWidth = 1061;
     public const int DefaultWindowHeight = 865;
     private const string ToolRestartIcon = "↻";
     private const string ToolRestartLabel = "Tool neu starten";
@@ -52,6 +54,7 @@ internal sealed class GuestMainWindow : Window
     private readonly Func<string, Task<int>> _connectUsbAsync;
     private readonly Func<string, Task<int>> _disconnectUsbAsync;
     private readonly Func<GuestConfig, Task> _saveConfigAsync;
+    private readonly Func<Task<GuestConfig>> _reloadConfigAsync;
     private readonly Func<string, Task> _restartForThemeChangeAsync;
     private readonly Func<Task> _exitForUpdateInstallAsync;
     private readonly Func<Task<(bool hyperVSocketActive, bool registryServiceOk)>> _runTransportDiagnosticsTestAsync;
@@ -89,6 +92,8 @@ internal sealed class GuestMainWindow : Window
     private readonly TextBlock _usbRuntimeStatusText = new() { Opacity = 0.9, VerticalAlignment = VerticalAlignment.Center };
     private readonly Border _usbHostFeatureStatusChip = new() { CornerRadius = new CornerRadius(9), MinHeight = 30, BorderThickness = new Thickness(1), Padding = new Thickness(10, 5, 10, 5), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _usbHostFeatureStatusChipText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+    private readonly Border _usbPageFeatureStatusChip = new() { CornerRadius = new CornerRadius(9), MinHeight = 26, BorderThickness = new Thickness(1), Padding = new Thickness(8, 4, 8, 4), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _usbPageFeatureStatusChipText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private readonly TextBlock _usbDisabledOverlayText = new() { Text = "Deaktiviert", Opacity = 0.34, FontSize = 34, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
     private readonly TextBlock _diagHyperVSocketText = new() { Text = "Unbekannt", Opacity = 0.9 };
     private readonly TextBlock _diagRegistryServiceText = new() { Text = "Unbekannt", Opacity = 0.9 };
@@ -102,10 +107,10 @@ internal sealed class GuestMainWindow : Window
     private bool _updateAvailable;
 
     private readonly ListView _usbListView = new();
-    private readonly CheckBox _usbFeatureEnabledCheckBox = new() { Content = "USB Funktion aktiv" };
+    private readonly ToggleSwitch _usbFeatureEnabledToggleSwitch = new() { Header = null, OffContent = "", OnContent = "" };
     private readonly ObservableCollection<GuestSharedFolderMapping> _sharedFolderMappings = [];
     private readonly ListView _sharedFolderMappingsListView = new();
-    private readonly CheckBox _sharedFolderFeatureEnabledCheckBox = new() { Content = "Shared-Folder Funktion aktiv" };
+    private readonly ToggleSwitch _sharedFolderFeatureEnabledToggleSwitch = new() { Header = null, OffContent = "", OnContent = "" };
     private readonly ComboBox _sharedFolderBaseDriveCombo = new() { Width = 90, MinWidth = 90, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly Border _sharedFolderSettingsPanel = new();
     private Button? _sharedFolderSaveDriveButton;
@@ -113,6 +118,8 @@ internal sealed class GuestMainWindow : Window
     private readonly TextBlock _sharedFolderStatusText = new() { Text = "Bereit.", Opacity = 0.88, TextWrapping = TextWrapping.Wrap };
     private readonly Border _sharedFolderHostFeatureStatusChip = new() { CornerRadius = new CornerRadius(9), MinHeight = 30, BorderThickness = new Thickness(1), Padding = new Thickness(10, 5, 10, 5), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _sharedFolderHostFeatureStatusChipText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+    private readonly Border _sharedFolderPageFeatureStatusChip = new() { CornerRadius = new CornerRadius(9), MinHeight = 26, BorderThickness = new Thickness(1), Padding = new Thickness(8, 4, 8, 4), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _sharedFolderPageFeatureStatusChipText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private readonly TextBlock _sharedFolderDisabledOverlayText = new() { Text = "Deaktiviert", Opacity = 0.34, FontSize = 34, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
     private readonly Ellipse _winFspRuntimeStatusDot = new() { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _winFspRuntimeStatusText = new() { Opacity = 0.9, VerticalAlignment = VerticalAlignment.Center };
@@ -162,6 +169,7 @@ internal sealed class GuestMainWindow : Window
     private readonly CheckBox _checkForUpdatesOnStartupCheckBox = new() { Content = "Beim Start auf Updates prüfen" };
     private readonly CheckBox _useHyperVSocketCheckBox = new() { Content = "Hyper-V Socket verwenden (bevorzugt)" };
     private readonly CheckBox _usbAutoConnectCheckBox = new() { Content = "Auto-Connect für ausgewähltes Gerät" };
+    private readonly CheckBox _usbDisconnectOnExitCheckBox = new() { Content = "Disconnect beim Beenden" };
     private readonly Border _usbHostAddressEditorCard = new()
     {
         BorderThickness = new Thickness(1),
@@ -242,6 +250,12 @@ internal sealed class GuestMainWindow : Window
     };
 
     private HelpWindow? _helpWindow;
+    private Grid? _headerGrid;
+    private StackPanel? _headerTitleStack;
+    private StackPanel? _headerStatusChipsRow;
+    private StackPanel? _headerTitleActions;
+    private TextBlock? _headerSubtitleText;
+    private bool _isCompactHeaderLayout;
     private int _selectedMenuIndex;
     private GuestConfig _config;
     private IReadOnlyList<UsbIpDeviceInfo> _usbDevices = [];
@@ -252,6 +266,9 @@ internal sealed class GuestMainWindow : Window
     private bool _isUsbModeBadgeHandlersAttached;
     private bool _suppressUsbTransportToggleEvents;
     private bool _suppressUsbAutoConnectToggleEvents;
+    private bool _suppressUsbDisconnectOnExitToggleEvents;
+    private bool _isHandlingMenuSwitch;
+    private bool _isMenuSwitchPromptOpen;
     private CancellationTokenSource? _usbTransportAutoRefreshCts;
     private MediaPlayer? _logoSpinPlayer;
     private List<UIElement>? _startupMainElements;
@@ -266,6 +283,7 @@ internal sealed class GuestMainWindow : Window
         Func<string, Task<int>> connectUsbAsync,
         Func<string, Task<int>> disconnectUsbAsync,
         Func<GuestConfig, Task> saveConfigAsync,
+        Func<Task<GuestConfig>> reloadConfigAsync,
         Func<string, Task> restartForThemeChangeAsync,
         Func<Task> exitForUpdateInstallAsync,
         Func<Task<(bool hyperVSocketActive, bool registryServiceOk)>> runTransportDiagnosticsTestAsync,
@@ -278,6 +296,7 @@ internal sealed class GuestMainWindow : Window
         _connectUsbAsync = connectUsbAsync;
         _disconnectUsbAsync = disconnectUsbAsync;
         _saveConfigAsync = saveConfigAsync;
+        _reloadConfigAsync = reloadConfigAsync;
         _restartForThemeChangeAsync = restartForThemeChangeAsync;
         _exitForUpdateInstallAsync = exitForUpdateInstallAsync;
         _runTransportDiagnosticsTestAsync = runTransportDiagnosticsTestAsync;
@@ -299,6 +318,8 @@ internal sealed class GuestMainWindow : Window
         ApplyConfigToControls();
         ApplyTheme(config.Ui.Theme);
         TryApplyWindowIcon();
+        SizeChanged += (_, _) => UpdateHeaderResponsiveLayout();
+        UpdateHeaderResponsiveLayout();
 
         GuestLogger.EntryWritten += OnLoggerEntryWritten;
         Closed += (_, _) => GuestLogger.EntryWritten -= OnLoggerEntryWritten;
@@ -310,15 +331,38 @@ internal sealed class GuestMainWindow : Window
 
     public void SelectMenuIndex(int index)
     {
+        _ = SelectMenuIndexAsync(index);
+    }
+
+    private async Task SelectMenuIndexAsync(int index)
+    {
+        if (_isHandlingMenuSwitch)
+        {
+            return;
+        }
+
         var normalized = Math.Clamp(index, 0, 3);
         if (_selectedMenuIndex == normalized)
         {
             return;
         }
 
-        _selectedMenuIndex = normalized;
-        UpdateNavSelection();
-        UpdatePageContent();
+        _isHandlingMenuSwitch = true;
+        try
+        {
+            if (!await TryHandlePendingSettingsBeforeMenuSwitchAsync(normalized))
+            {
+                return;
+            }
+
+            _selectedMenuIndex = normalized;
+            UpdateNavSelection();
+            UpdatePageContent();
+        }
+        finally
+        {
+            _isHandlingMenuSwitch = false;
+        }
     }
 
     public void ApplyTheme(string theme)
@@ -625,6 +669,9 @@ internal sealed class GuestMainWindow : Window
 
     public void UpdateUsbDevices(IReadOnlyList<UsbIpDeviceInfo> devices)
     {
+        var selectedBeforeRefresh = GetSelectedUsbDevice();
+        var selectedKeyBeforeRefresh = BuildUsbSelectionKey(selectedBeforeRefresh);
+
         _usbDevices = devices;
 
         if (!_isUsbClientAvailable)
@@ -633,6 +680,7 @@ internal sealed class GuestMainWindow : Window
             {
                 "USB/IP-Client nicht installiert. USB-Funktionen sind deaktiviert."
             };
+            _usbListView.SelectedIndex = -1;
             return;
         }
 
@@ -642,12 +690,53 @@ internal sealed class GuestMainWindow : Window
             {
                 "Aktuell keine Geräte zum Connecten vorhanden."
             };
+            _usbListView.SelectedIndex = -1;
             UpdateAutoConnectToggleFromSelection();
             return;
         }
 
         _usbListView.ItemsSource = devices.Select(item => item.DisplayName).ToList();
+
+        if (!string.IsNullOrWhiteSpace(selectedKeyBeforeRefresh))
+        {
+            var restoredIndex = devices
+                .Select((device, index) => new { device, index })
+                .FirstOrDefault(entry => string.Equals(BuildUsbSelectionKey(entry.device), selectedKeyBeforeRefresh, StringComparison.OrdinalIgnoreCase))
+                ?.index ?? -1;
+
+            _usbListView.SelectedIndex = restoredIndex;
+        }
+        else if (_usbListView.SelectedIndex < 0 && devices.Count > 0)
+        {
+            _usbListView.SelectedIndex = 0;
+        }
+
         UpdateAutoConnectToggleFromSelection();
+    }
+
+    private static string BuildUsbSelectionKey(UsbIpDeviceInfo? device)
+    {
+        if (device is null)
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(device.BusId))
+        {
+            return "bus:" + device.BusId.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(device.HardwareId))
+        {
+            return "hw:" + device.HardwareId.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(device.Description))
+        {
+            return "desc:" + device.Description.Trim();
+        }
+
+        return string.Empty;
     }
 
     public void UpdateUsbClientAvailability(bool isUsbClientAvailable)
@@ -746,10 +835,15 @@ internal sealed class GuestMainWindow : Window
     private Grid BuildHeader()
     {
         var headerGrid = new Grid();
+        _headerGrid = headerGrid;
+        headerGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        headerGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var titleStack = new StackPanel { Orientation = Orientation.Vertical, Spacing = 2 };
+        _headerTitleStack = titleStack;
         var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
         titleRow.Children.Add(new Image
         {
@@ -764,14 +858,36 @@ internal sealed class GuestMainWindow : Window
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         });
         titleStack.Children.Add(titleRow);
-        titleStack.Children.Add(new TextBlock
+        _headerSubtitleText = new TextBlock
         {
             Text = "dein nützlicher Hyper V Helfer",
             Opacity = 0.8,
             Margin = new Thickness(0, 0, 0, 6)
-        });
+        };
+        titleStack.Children.Add(_headerSubtitleText);
 
+        Grid.SetRow(titleStack, 0);
+        Grid.SetColumn(titleStack, 0);
         headerGrid.Children.Add(titleStack);
+
+        _usbHostFeatureStatusChip.Child = _usbHostFeatureStatusChipText;
+        _sharedFolderHostFeatureStatusChip.Child = _sharedFolderHostFeatureStatusChipText;
+        _usbTransportModeBadge.Child = _usbTransportModeBadgeText;
+
+        var statusChipsRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Margin = new Thickness(12, 2, 12, 0),
+            VerticalAlignment = VerticalAlignment.Top
+        };
+        _headerStatusChipsRow = statusChipsRow;
+        statusChipsRow.Children.Add(_usbHostFeatureStatusChip);
+        statusChipsRow.Children.Add(_sharedFolderHostFeatureStatusChip);
+        statusChipsRow.Children.Add(_usbTransportModeBadge);
+        Grid.SetRow(statusChipsRow, 0);
+        Grid.SetColumn(statusChipsRow, 1);
+        headerGrid.Children.Add(statusChipsRow);
 
         var titleActions = new StackPanel
         {
@@ -780,6 +896,7 @@ internal sealed class GuestMainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top
         };
+        _headerTitleActions = titleActions;
 
         var helpButton = new Button
         {
@@ -825,10 +942,67 @@ internal sealed class GuestMainWindow : Window
         logoBorder.Tapped += (_, _) => RunLogoEasterEgg();
         titleActions.Children.Add(logoBorder);
 
-        Grid.SetColumn(titleActions, 1);
+        Grid.SetRow(titleActions, 0);
+        Grid.SetColumn(titleActions, 2);
         headerGrid.Children.Add(titleActions);
 
+        UpdateHeaderResponsiveLayout();
         return headerGrid;
+    }
+
+    private void UpdateHeaderResponsiveLayout()
+    {
+        if (_headerGrid is null || _headerStatusChipsRow is null || _headerTitleStack is null || _headerTitleActions is null)
+        {
+            return;
+        }
+
+        var windowWidth = (Content as FrameworkElement)?.ActualWidth ?? DefaultWindowWidth;
+        var titleWidth = _headerTitleStack.ActualWidth;
+        var chipsWidth = _headerStatusChipsRow.ActualWidth;
+        var actionsWidth = _headerTitleActions.ActualWidth;
+
+        var hasMeasuredHeaderWidths = titleWidth > 0 && chipsWidth > 0 && actionsWidth > 0;
+        var requiredTopRowWidth = titleWidth + chipsWidth + actionsWidth + 72;
+        var compact = hasMeasuredHeaderWidths
+            ? windowWidth < requiredTopRowWidth
+            : windowWidth > 0 && windowWidth < 1160;
+        _isCompactHeaderLayout = compact;
+
+        if (_headerSubtitleText is not null)
+        {
+            _headerSubtitleText.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        _usbHostFeatureStatusChip.Padding = compact ? new Thickness(8, 4, 8, 4) : new Thickness(10, 5, 10, 5);
+        _usbHostFeatureStatusChip.MinHeight = compact ? 26 : 30;
+        _usbHostFeatureStatusChipText.FontSize = compact ? 11 : 12;
+
+        _sharedFolderHostFeatureStatusChip.Padding = compact ? new Thickness(8, 4, 8, 4) : new Thickness(10, 5, 10, 5);
+        _sharedFolderHostFeatureStatusChip.MinHeight = compact ? 26 : 30;
+        _sharedFolderHostFeatureStatusChipText.FontSize = compact ? 11 : 12;
+
+        _usbTransportModeBadge.Padding = compact ? new Thickness(8, 4, 8, 4) : new Thickness(10, 5, 10, 5);
+        _usbTransportModeBadge.MinHeight = compact ? 26 : 30;
+        _usbTransportModeBadgeText.FontSize = compact ? 11 : 12;
+
+        _headerStatusChipsRow.Orientation = Orientation.Horizontal;
+        _headerStatusChipsRow.Spacing = compact ? 7 : 8;
+        _headerStatusChipsRow.Margin = compact ? new Thickness(0, 8, 0, 0) : new Thickness(0, 6, 0, 0);
+
+        Grid.SetRow(_headerTitleStack, 0);
+        Grid.SetColumn(_headerTitleStack, 0);
+        Grid.SetColumnSpan(_headerTitleStack, 1);
+
+        Grid.SetRow(_headerTitleActions, 0);
+        Grid.SetColumn(_headerTitleActions, 2);
+
+        Grid.SetRow(_headerStatusChipsRow, 1);
+        Grid.SetColumn(_headerStatusChipsRow, 0);
+        Grid.SetColumnSpan(_headerStatusChipsRow, 3);
+        _headerStatusChipsRow.HorizontalAlignment = HorizontalAlignment.Left;
+
+        UpdateUsbTransportHeaderStatus();
     }
 
     private Grid BuildMainContentGrid()
@@ -857,38 +1031,6 @@ internal sealed class GuestMainWindow : Window
         mainGrid.Children.Add(sidebar);
 
         var contentGrid = new Grid();
-        contentGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        contentGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) });
-        contentGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-
-        _usbTransportModeBadge.Child = _usbTransportModeBadgeText;
-
-        var topRowContent = new Grid { ColumnSpacing = 10 };
-        topRowContent.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        topRowContent.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        topRowContent.Children.Add(new TextBlock
-        {
-            Text = "Guest USB-Share & Shared Folder Management",
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            VerticalAlignment = VerticalAlignment.Center
-        });
-
-        Grid.SetColumn(_usbTransportModeBadge, 1);
-        topRowContent.Children.Add(_usbTransportModeBadge);
-
-        var topRow = new Border
-        {
-            CornerRadius = new CornerRadius(10),
-            BorderThickness = new Thickness(1),
-            BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
-            Background = Application.Current.Resources["PanelBackgroundBrush"] as Brush,
-            Padding = new Thickness(12),
-            Child = topRowContent
-        };
-
-        contentGrid.Children.Add(topRow);
-        Grid.SetRow(_pageContent, 2);
         contentGrid.Children.Add(_pageContent);
 
         Grid.SetColumn(contentGrid, 2);
@@ -1484,15 +1626,31 @@ internal sealed class GuestMainWindow : Window
         headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        headerRow.Children.Add(new TextBlock
+        var headerLeft = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 14,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        _usbFeatureEnabledToggleSwitch.Toggled += OnUsbFeatureToggleChanged;
+        _usbFeatureEnabledToggleSwitch.IsOn = _config.Usb?.Enabled != false;
+        _usbFeatureEnabledToggleSwitch.MinWidth = 54;
+        _usbFeatureEnabledToggleSwitch.VerticalAlignment = VerticalAlignment.Center;
+        headerLeft.Children.Add(_usbFeatureEnabledToggleSwitch);
+
+        headerLeft.Children.Add(new TextBlock
         {
             Text = "USB-Share (USB/IP-WIN2 Client im Hintergrund)",
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center
         });
+        headerRow.Children.Add(headerLeft);
 
-        _usbHostFeatureStatusChip.Child = _usbHostFeatureStatusChipText;
-        Grid.SetColumn(_usbHostFeatureStatusChip, 1);
-        headerRow.Children.Add(_usbHostFeatureStatusChip);
+        _usbPageFeatureStatusChip.Child = _usbPageFeatureStatusChipText;
+        Grid.SetColumn(_usbPageFeatureStatusChip, 1);
+        headerRow.Children.Add(_usbPageFeatureStatusChip);
+
         actionsStack.Children.Add(headerRow);
 
         _usbRuntimeInstallButton = CreateIconButton("⬇", "Installation usbip-win2", onClick: async (_, _) => await InstallGuestUsbRuntimeAsync());
@@ -1520,13 +1678,12 @@ internal sealed class GuestMainWindow : Window
         _usbConnectButton.IsEnabled = IsUsbFeatureUsable();
         _usbDisconnectButton.IsEnabled = IsUsbFeatureUsable();
 
-        Grid.SetColumn(_usbFeatureEnabledCheckBox, 0);
-        Grid.SetColumn(_usbRefreshButton, 1);
-        Grid.SetColumn(_usbConnectButton, 2);
-        Grid.SetColumn(_usbDisconnectButton, 3);
-        Grid.SetColumn(_usbAutoConnectCheckBox, 4);
+        Grid.SetColumn(_usbRefreshButton, 0);
+        Grid.SetColumn(_usbConnectButton, 1);
+        Grid.SetColumn(_usbDisconnectButton, 2);
+        Grid.SetColumn(_usbAutoConnectCheckBox, 3);
+        Grid.SetColumn(_usbDisconnectOnExitCheckBox, 4);
 
-        actionRow.Children.Add(_usbFeatureEnabledCheckBox);
         actionRow.Children.Add(_usbRefreshButton);
         actionRow.Children.Add(_usbConnectButton);
         actionRow.Children.Add(_usbDisconnectButton);
@@ -1539,11 +1696,15 @@ internal sealed class GuestMainWindow : Window
         _usbAutoConnectCheckBox.Unchecked += async (_, _) => await SetSelectedUsbDeviceAutoConnectAsync(false);
         actionRow.Children.Add(_usbAutoConnectCheckBox);
 
-        _usbFeatureEnabledCheckBox.Checked += OnUsbFeatureToggleChanged;
-        _usbFeatureEnabledCheckBox.Unchecked += OnUsbFeatureToggleChanged;
-        _usbFeatureEnabledCheckBox.VerticalAlignment = VerticalAlignment.Center;
-        _usbFeatureEnabledCheckBox.HorizontalAlignment = HorizontalAlignment.Left;
-        _usbFeatureEnabledCheckBox.Margin = new Thickness(0, 0, 4, 0);
+        _usbDisconnectOnExitCheckBox.IsEnabled = IsUsbFeatureUsable();
+        _usbDisconnectOnExitCheckBox.Margin = new Thickness(6, 0, 0, 0);
+        _usbDisconnectOnExitCheckBox.VerticalAlignment = VerticalAlignment.Center;
+        _usbDisconnectOnExitCheckBox.HorizontalAlignment = HorizontalAlignment.Left;
+        _usbDisconnectOnExitCheckBox.IsChecked = _config.Usb?.DisconnectOnExit != false;
+        _usbDisconnectOnExitCheckBox.Checked += async (_, _) => await SetUsbDisconnectOnExitAsync(true);
+        _usbDisconnectOnExitCheckBox.Unchecked += async (_, _) => await SetUsbDisconnectOnExitAsync(false);
+        actionRow.Children.Add(_usbDisconnectOnExitCheckBox);
+
         actionsStack.Children.Add(actionRow);
 
         if (!_isUsbClientAvailable)
@@ -1556,6 +1717,14 @@ internal sealed class GuestMainWindow : Window
                 Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
             });
         }
+
+        actionsStack.Children.Add(new TextBlock
+        {
+            Text = "Hinweis: Für USB-Share muss am Host 'RemoteFX USB Device Redirection' in den Richtlinien deaktiviert sein.",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.88,
+            Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
+        });
 
         UpdateUsbRuntimeStatusUi();
 
@@ -1620,18 +1789,32 @@ internal sealed class GuestMainWindow : Window
         var headerRow = new Grid { ColumnSpacing = 10 };
         headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var headerLeft = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 14,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        _sharedFolderFeatureEnabledToggleSwitch.Toggled += OnSharedFolderFeatureToggleChanged;
+        _sharedFolderFeatureEnabledToggleSwitch.IsOn = _config.SharedFolders?.Enabled == true;
+        _sharedFolderFeatureEnabledToggleSwitch.MinWidth = 54;
+        _sharedFolderFeatureEnabledToggleSwitch.VerticalAlignment = VerticalAlignment.Center;
+        headerLeft.Children.Add(_sharedFolderFeatureEnabledToggleSwitch);
 
         var titleText = new TextBlock
         {
             Text = "Shared Folder (Netzlaufwerk über WinFsp im Hintergrund)",
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center
         };
-        headerRow.Children.Add(titleText);
+        headerLeft.Children.Add(titleText);
+        headerRow.Children.Add(headerLeft);
 
-        _sharedFolderHostFeatureStatusChip.Child = _sharedFolderHostFeatureStatusChipText;
-        Grid.SetColumn(_sharedFolderHostFeatureStatusChip, 1);
-        headerRow.Children.Add(_sharedFolderHostFeatureStatusChip);
+        _sharedFolderPageFeatureStatusChip.Child = _sharedFolderPageFeatureStatusChipText;
+        Grid.SetColumn(_sharedFolderPageFeatureStatusChip, 1);
+        headerRow.Children.Add(_sharedFolderPageFeatureStatusChip);
 
         editorStack.Children.Add(headerRow);
 
@@ -1641,12 +1824,6 @@ internal sealed class GuestMainWindow : Window
         winFspRuntimeActionsRow.Children.Add(_winFspRuntimeInstallButton);
         winFspRuntimeActionsRow.Children.Add(_winFspRuntimeRestartButton);
         editorStack.Children.Add(winFspRuntimeActionsRow);
-
-        _sharedFolderFeatureEnabledCheckBox.Checked += OnSharedFolderFeatureToggleChanged;
-        _sharedFolderFeatureEnabledCheckBox.Unchecked += OnSharedFolderFeatureToggleChanged;
-        _sharedFolderFeatureEnabledCheckBox.VerticalAlignment = VerticalAlignment.Center;
-        _sharedFolderFeatureEnabledCheckBox.HorizontalAlignment = HorizontalAlignment.Left;
-        _sharedFolderFeatureEnabledCheckBox.Margin = new Thickness(0);
 
         var settingsStack = new StackPanel { Spacing = 6 };
 
@@ -1675,14 +1852,12 @@ internal sealed class GuestMainWindow : Window
         actionsRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         actionsRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        actionsRow.Children.Add(_sharedFolderFeatureEnabledCheckBox);
-
         var refreshHostListButton = CreateIconButton("⟳", "Refresh", onClick: async (_, _) => await SyncSharedFoldersFromHostAsync(forceHostFeatureRefresh: true));
-        Grid.SetColumn(refreshHostListButton, 1);
+        Grid.SetColumn(refreshHostListButton, 0);
         actionsRow.Children.Add(refreshHostListButton);
 
         var selfTestButton = CreateIconButton("🧪", "Selftest", onClick: async (_, _) => await RunSharedFolderSelfTestAsync());
-        Grid.SetColumn(selfTestButton, 2);
+        Grid.SetColumn(selfTestButton, 1);
         actionsRow.Children.Add(selfTestButton);
 
         var driveLabel = new TextBlock
@@ -1691,14 +1866,14 @@ internal sealed class GuestMainWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Opacity = 0.9
         };
-        Grid.SetColumn(driveLabel, 3);
+        Grid.SetColumn(driveLabel, 2);
         actionsRow.Children.Add(driveLabel);
 
-        Grid.SetColumn(_sharedFolderBaseDriveCombo, 4);
+        Grid.SetColumn(_sharedFolderBaseDriveCombo, 3);
         actionsRow.Children.Add(_sharedFolderBaseDriveCombo);
 
         _sharedFolderSaveDriveButton = CreateIconButton("💾", "Speichern", onClick: async (_, _) => await SaveSharedFolderBaseDriveAsync());
-        Grid.SetColumn(_sharedFolderSaveDriveButton, 5);
+        Grid.SetColumn(_sharedFolderSaveDriveButton, 4);
         actionsRow.Children.Add(_sharedFolderSaveDriveButton);
 
         settingsStack.Children.Add(actionsRow);
@@ -1834,7 +2009,7 @@ internal sealed class GuestMainWindow : Window
         _suppressSharedFolderFeatureToggle = true;
         try
         {
-            _sharedFolderFeatureEnabledCheckBox.IsChecked = _config.SharedFolders.Enabled;
+            _sharedFolderFeatureEnabledToggleSwitch.IsOn = _config.SharedFolders.Enabled;
         }
         finally
         {
@@ -1931,7 +2106,7 @@ internal sealed class GuestMainWindow : Window
             _suppressSharedFolderFeatureToggle = true;
             try
             {
-                _sharedFolderFeatureEnabledCheckBox.IsChecked = false;
+                _sharedFolderFeatureEnabledToggleSwitch.IsOn = false;
             }
             finally
             {
@@ -1946,7 +2121,7 @@ internal sealed class GuestMainWindow : Window
             return;
         }
 
-        var enabled = _sharedFolderFeatureEnabledCheckBox.IsChecked == true;
+        var enabled = _sharedFolderFeatureEnabledToggleSwitch.IsOn;
         _config.SharedFolders ??= new GuestSharedFolderSettings();
         _config.SharedFolders.Enabled = enabled;
         UpdateSharedFolderFeatureUi();
@@ -1965,7 +2140,7 @@ internal sealed class GuestMainWindow : Window
             _suppressUsbFeatureToggle = true;
             try
             {
-                _usbFeatureEnabledCheckBox.IsChecked = false;
+                _usbFeatureEnabledToggleSwitch.IsOn = false;
             }
             finally
             {
@@ -1980,7 +2155,7 @@ internal sealed class GuestMainWindow : Window
             return;
         }
 
-        var enabled = _usbFeatureEnabledCheckBox.IsChecked == true;
+        var enabled = _usbFeatureEnabledToggleSwitch.IsOn;
         _config.Usb ??= new GuestUsbSettings();
         _config.Usb.Enabled = enabled;
         UpdateUsbRuntimeStatusUi();
@@ -2041,7 +2216,7 @@ internal sealed class GuestMainWindow : Window
         var effectiveEnabled = hostEnabled && localEnabled && winFspAvailable;
         var interactive = effectiveEnabled && !_sharedFolderHostFeatureReactivationPending;
 
-        _sharedFolderFeatureEnabledCheckBox.IsEnabled = hostEnabled && winFspAvailable;
+        _sharedFolderFeatureEnabledToggleSwitch.IsEnabled = hostEnabled && winFspAvailable;
         _sharedFolderSettingsPanel.IsHitTestVisible = true;
         _sharedFolderSettingsPanel.Opacity = 1.0;
         _sharedFolderMappingsListView.IsEnabled = interactive;
@@ -2055,8 +2230,13 @@ internal sealed class GuestMainWindow : Window
         var sharedFolderChipPalette = ResolveHostFeatureChipPalette(effectiveEnabled);
         _sharedFolderHostFeatureStatusChip.Background = sharedFolderChipPalette.chipBackground;
         _sharedFolderHostFeatureStatusChip.BorderBrush = sharedFolderChipPalette.chipBorder;
-        _sharedFolderHostFeatureStatusChipText.Text = effectiveEnabled ? "Aktiv" : "Inaktiv";
+        _sharedFolderHostFeatureStatusChipText.Text = effectiveEnabled ? "Share Aktiv" : "Share Inaktiv";
         _sharedFolderHostFeatureStatusChipText.Foreground = sharedFolderChipPalette.textForeground;
+
+        _sharedFolderPageFeatureStatusChip.Background = sharedFolderChipPalette.chipBackground;
+        _sharedFolderPageFeatureStatusChip.BorderBrush = sharedFolderChipPalette.chipBorder;
+        _sharedFolderPageFeatureStatusChipText.Text = effectiveEnabled ? "Aktiv" : "Inaktiv";
+        _sharedFolderPageFeatureStatusChipText.Foreground = sharedFolderChipPalette.textForeground;
 
         if (!hostEnabled)
         {
@@ -2375,7 +2555,7 @@ internal sealed class GuestMainWindow : Window
     private async Task SaveSharedFolderMappingsToConfigAsync()
     {
         _config.SharedFolders ??= new GuestSharedFolderSettings();
-        _config.SharedFolders.Enabled = _sharedFolderFeatureEnabledCheckBox.IsChecked == true;
+        _config.SharedFolders.Enabled = _sharedFolderFeatureEnabledToggleSwitch.IsOn;
         _config.SharedFolders.BaseDriveLetter = GetSharedFolderBaseDriveLetter();
         _config.SharedFolders.Mappings = _sharedFolderMappings
             .Select(item => new GuestSharedFolderMapping
@@ -2719,10 +2899,16 @@ internal sealed class GuestMainWindow : Window
         };
 
         configHeaderActions.Children.Add(CreateIconButton("💾", "Speichern", onClick: async (_, _) => await SaveSettingsAsync()));
-        configHeaderActions.Children.Add(CreateIconButton("⟳", "Neu laden", onClick: (_, _) =>
+        configHeaderActions.Children.Add(CreateIconButton("⟳", "Neu laden", onClick: async (_, _) =>
         {
-            ApplyConfigToControls();
-            AppendNotification("[Info] Einstellungen aus Config neu geladen.");
+            try
+            {
+                await ReloadConfigFromDiskAsync("[Info] Einstellungen aus Datei neu geladen.");
+            }
+            catch (Exception ex)
+            {
+                AppendNotification($"[Error] Konfiguration konnte nicht neu geladen werden: {ex.Message}");
+            }
         }));
         configHeaderActions.Children.Add(CreateIconButton(ToolRestartIcon, ToolRestartLabel, onClick: async (_, _) => await RestartGuestToolAsync()));
 
@@ -2741,23 +2927,27 @@ internal sealed class GuestMainWindow : Window
             Padding = new Thickness(14)
         };
 
-        var systemStack = new StackPanel { Spacing = 8 };
+        var systemStack = new StackPanel { Spacing = 10 };
         systemStack.Children.Add(new TextBlock { Text = "System & Updates", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 16 });
 
-        var quickTogglesGrid = new Grid { ColumnSpacing = 10, RowSpacing = 4 };
-        quickTogglesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var quickTogglesGrid = new Grid { ColumnSpacing = 26, RowSpacing = 6, HorizontalAlignment = HorizontalAlignment.Left };
+        quickTogglesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        quickTogglesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         quickTogglesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         quickTogglesGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         quickTogglesGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
+        _minimizeToTrayCheckBox.Margin = new Thickness(0);
         Grid.SetColumn(_minimizeToTrayCheckBox, 0);
         Grid.SetRow(_minimizeToTrayCheckBox, 0);
         quickTogglesGrid.Children.Add(_minimizeToTrayCheckBox);
 
+        _startMinimizedCheckBox.Margin = new Thickness(0);
         Grid.SetColumn(_startMinimizedCheckBox, 1);
         Grid.SetRow(_startMinimizedCheckBox, 0);
         quickTogglesGrid.Children.Add(_startMinimizedCheckBox);
 
+        _startWithWindowsCheckBox.Margin = new Thickness(0);
         Grid.SetColumn(_startWithWindowsCheckBox, 0);
         Grid.SetRow(_startWithWindowsCheckBox, 1);
         quickTogglesGrid.Children.Add(_startWithWindowsCheckBox);
@@ -2769,10 +2959,6 @@ internal sealed class GuestMainWindow : Window
         quickTogglesGrid.Children.Add(_checkForUpdatesOnStartupCheckBox);
 
         systemStack.Children.Add(quickTogglesGrid);
-
-        _minimizeToTrayCheckBox.Margin = new Thickness(0);
-        _startMinimizedCheckBox.Margin = new Thickness(0);
-        _startWithWindowsCheckBox.Margin = new Thickness(0);
 
         var themeRow = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0) };
         themeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
@@ -2892,13 +3078,6 @@ internal sealed class GuestMainWindow : Window
             FontSize = 16,
             VerticalAlignment = VerticalAlignment.Center,
             Opacity = 0.9
-        });
-        usbHeaderTitleRow.Children.Add(new TextBlock
-        {
-            Text = "(Hyper-V Socket kann bevorzugt genutzt werden, IP Modus als Fallback)",
-            FontSize = 16,
-            VerticalAlignment = VerticalAlignment.Center,
-            Opacity = 0.86
         });
         usbHeaderTextStack.Children.Add(usbHeaderTitleRow);
         usbHeaderGrid.Children.Add(usbHeaderTextStack);
@@ -3169,6 +3348,120 @@ internal sealed class GuestMainWindow : Window
         return _settingsPage;
     }
 
+    private async Task<bool> TryHandlePendingSettingsBeforeMenuSwitchAsync(int targetMenuIndex)
+    {
+        if (_selectedMenuIndex != SettingsMenuIndex || targetMenuIndex == SettingsMenuIndex || !HasPendingSettingsChanges())
+        {
+            return true;
+        }
+
+        if (_isMenuSwitchPromptOpen)
+        {
+            return false;
+        }
+
+        _isMenuSwitchPromptOpen = true;
+        try
+        {
+            var result = await ShowUnsavedSettingsPromptAsync();
+
+            if (result == ContentDialogResult.None)
+            {
+                return false;
+            }
+
+            if (result == ContentDialogResult.Primary)
+            {
+                await SaveSettingsAsync();
+                return !HasPendingSettingsChanges();
+            }
+
+            await ReloadConfigFromDiskAsync("[Info] Ungespeicherte Änderungen verworfen. Konfiguration neu geladen.");
+            var hasPendingAfterReload = HasPendingSettingsChanges();
+            if (hasPendingAfterReload)
+            {
+                AppendNotification("[Warn] Einstellungen konnten nicht vollständig zurückgesetzt werden. Bitte erneut 'Neu laden' ausführen.");
+            }
+
+            return !hasPendingAfterReload;
+        }
+        catch (Exception ex)
+        {
+            AppendNotification($"[Error] Konfiguration konnte nicht neu geladen werden: {ex.Message}");
+            return false;
+        }
+        finally
+        {
+            _isMenuSwitchPromptOpen = false;
+        }
+    }
+
+    private bool HasPendingSettingsChanges()
+    {
+        var selectedTheme = GuestConfigService.NormalizeTheme((_themeCombo.SelectedItem as string) ?? _config.Ui.Theme);
+        var currentTheme = GuestConfigService.NormalizeTheme(_config.Ui.Theme);
+        if (!string.Equals(selectedTheme, currentTheme, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if ((_startWithWindowsCheckBox.IsChecked == true) != _config.Ui.StartWithWindows
+            || (_startMinimizedCheckBox.IsChecked == true) != _config.Ui.StartMinimized
+            || (_minimizeToTrayCheckBox.IsChecked == true) != _config.Ui.MinimizeToTray
+            || (_checkForUpdatesOnStartupCheckBox.IsChecked != false) != _config.Ui.CheckForUpdatesOnStartup)
+        {
+            return true;
+        }
+
+        if ((_usbFeatureEnabledToggleSwitch.IsOn) != (_config.Usb?.Enabled != false)
+            || (_usbDisconnectOnExitCheckBox.IsChecked != false) != (_config.Usb?.DisconnectOnExit != false)
+            || (_useHyperVSocketCheckBox.IsChecked != false) != (_config.Usb?.UseHyperVSocket != false))
+        {
+            return true;
+        }
+
+        var configuredHost = (_config.Usb?.HostAddress ?? string.Empty).Trim();
+        var editorHost = (_usbHostAddressTextBox.Text ?? string.Empty).Trim();
+        return !string.Equals(editorHost, configuredHost, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<ContentDialogResult> ShowUnsavedSettingsPromptAsync()
+    {
+        if (Content is not FrameworkElement root || root.XamlRoot is null)
+        {
+            return ContentDialogResult.None;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = root.XamlRoot,
+            Title = "Ungespeicherte Änderungen",
+            Content = "Es gibt ungespeicherte Änderungen in den Einstellungen. Jetzt speichern?",
+            PrimaryButtonText = "Speichern",
+            SecondaryButtonText = "Nein",
+            CloseButtonText = "Abbrechen",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        return await dialog.ShowAsync();
+    }
+
+    private async Task ReloadConfigFromDiskAsync(string? successNotification = null)
+    {
+        var reloadedConfig = await _reloadConfigAsync();
+        _config = reloadedConfig ?? new GuestConfig();
+        _config.Usb ??= new GuestUsbSettings();
+        _config.SharedFolders ??= new GuestSharedFolderSettings();
+        _config.Ui ??= new GuestUiSettings();
+        _config.FileService ??= new GuestFileServiceSettings();
+        ApplyConfigToControls();
+
+        if (!string.IsNullOrWhiteSpace(successNotification))
+        {
+            AppendNotification(successNotification);
+        }
+    }
+
     private void UpdateNavSelection()
     {
         for (var index = 0; index < _navButtons.Count; index++)
@@ -3216,11 +3509,21 @@ internal sealed class GuestMainWindow : Window
         _suppressUsbFeatureToggle = true;
         try
         {
-            _usbFeatureEnabledCheckBox.IsChecked = _config.Usb?.Enabled != false;
+            _usbFeatureEnabledToggleSwitch.IsOn = _config.Usb?.Enabled != false;
         }
         finally
         {
             _suppressUsbFeatureToggle = false;
+        }
+
+        _suppressUsbDisconnectOnExitToggleEvents = true;
+        try
+        {
+            _usbDisconnectOnExitCheckBox.IsChecked = _config.Usb?.DisconnectOnExit != false;
+        }
+        finally
+        {
+            _suppressUsbDisconnectOnExitToggleEvents = false;
         }
 
         UpdateUsbTransportModePresentation();
@@ -3297,7 +3600,8 @@ internal sealed class GuestMainWindow : Window
         _config.Ui.MinimizeToTray = _minimizeToTrayCheckBox.IsChecked == true;
         _config.Ui.CheckForUpdatesOnStartup = _checkForUpdatesOnStartupCheckBox.IsChecked != false;
         _config.Usb ??= new GuestUsbSettings();
-        _config.Usb.Enabled = _usbFeatureEnabledCheckBox.IsChecked != false;
+        _config.Usb.Enabled = _usbFeatureEnabledToggleSwitch.IsOn;
+        _config.Usb.DisconnectOnExit = _usbDisconnectOnExitCheckBox.IsChecked != false;
         _config.Usb.UseHyperVSocket = _useHyperVSocketCheckBox.IsChecked != false;
         _config.Usb.HostAddress = (_usbHostAddressTextBox.Text ?? string.Empty).Trim();
 
@@ -3444,9 +3748,13 @@ internal sealed class GuestMainWindow : Window
 
         if (useHyperVSocket)
         {
-            _usbTransportModeBadgeText.Text = hyperVSocketLive
-                ? "Hyper-Socket aktiv"
-                : (fallbackActive ? "IP-Fallback aktiv" : "Hyper-Socket bevorzugt");
+            _usbTransportModeBadgeText.Text = _isCompactHeaderLayout
+                ? (hyperVSocketLive
+                    ? "Hyper-V aktiv"
+                    : (fallbackActive ? "IP-Fallback" : "Hyper-V bevorzugt"))
+                : (hyperVSocketLive
+                    ? "Hyper-Socket aktiv"
+                    : (fallbackActive ? "IP-Fallback aktiv" : "Hyper-Socket bevorzugt"));
             var palette = fallbackActive
                 ? ResolveUsbModePalette(forHyperV: false, isActive: true)
                 : ResolveUsbModePalette(forHyperV: true, isActive: hyperVSocketLive);
@@ -3460,7 +3768,9 @@ internal sealed class GuestMainWindow : Window
         var configuredHost = (_usbHostAddressTextBox.Text ?? _config.Usb?.HostAddress ?? string.Empty).Trim();
         var ipDisplay = string.IsNullOrWhiteSpace(configuredHost) ? "auto" : configuredHost;
 
-        _usbTransportModeBadgeText.Text = $"IP-Mode: {ipDisplay}";
+        _usbTransportModeBadgeText.Text = _isCompactHeaderLayout
+            ? "IP-Mode"
+            : $"IP-Mode: {ipDisplay}";
         var ipPalette = ResolveUsbModePalette(forHyperV: false, isActive: true);
         _usbTransportModeBadge.Background = ipPalette.chipBackground;
         _usbTransportModeBadge.BorderBrush = ipPalette.chipBorder;
@@ -3570,6 +3880,26 @@ internal sealed class GuestMainWindow : Window
         }
 
         return string.Empty;
+    }
+
+    private async Task SetUsbDisconnectOnExitAsync(bool enabled)
+    {
+        if (_suppressUsbDisconnectOnExitToggleEvents)
+        {
+            return;
+        }
+
+        _config.Usb ??= new GuestUsbSettings();
+        if (_config.Usb.DisconnectOnExit == enabled)
+        {
+            return;
+        }
+
+        _config.Usb.DisconnectOnExit = enabled;
+        await _saveConfigAsync(_config);
+        AppendNotification(enabled
+            ? "[Info] USB-Disconnect beim Beenden aktiviert."
+            : "[Info] USB-Disconnect beim Beenden deaktiviert.");
     }
 
     private void UpdateAutoConnectToggleFromSelection()
@@ -3957,6 +4287,21 @@ internal sealed class GuestMainWindow : Window
         _helpWindow.Activate();
     }
 
+    public void CloseAuxiliaryWindows()
+    {
+        try
+        {
+            _helpWindow?.Close();
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _helpWindow = null;
+        }
+    }
+
     private void OpenReleasePage()
     {
         Process.Start(new ProcessStartInfo
@@ -4339,10 +4684,15 @@ internal sealed class GuestMainWindow : Window
         var usbChipPalette = ResolveHostFeatureChipPalette(usbEffectiveEnabled);
         _usbHostFeatureStatusChip.Background = usbChipPalette.chipBackground;
         _usbHostFeatureStatusChip.BorderBrush = usbChipPalette.chipBorder;
-        _usbHostFeatureStatusChipText.Text = usbEffectiveEnabled ? "Aktiv" : "Inaktiv";
+        _usbHostFeatureStatusChipText.Text = usbEffectiveEnabled ? "USB Aktiv" : "USB Inaktiv";
         _usbHostFeatureStatusChipText.Foreground = usbChipPalette.textForeground;
 
-        _usbFeatureEnabledCheckBox.IsEnabled = hostEnabled && isAvailable;
+        _usbPageFeatureStatusChip.Background = usbChipPalette.chipBackground;
+        _usbPageFeatureStatusChip.BorderBrush = usbChipPalette.chipBorder;
+        _usbPageFeatureStatusChipText.Text = usbEffectiveEnabled ? "Aktiv" : "Inaktiv";
+        _usbPageFeatureStatusChipText.Foreground = usbChipPalette.textForeground;
+
+        _usbFeatureEnabledToggleSwitch.IsEnabled = hostEnabled && isAvailable;
 
         if (_usbRuntimeInstallButton is not null)
         {
@@ -4372,6 +4722,7 @@ internal sealed class GuestMainWindow : Window
         }
 
         _usbAutoConnectCheckBox.IsEnabled = featureUsable;
+        _usbDisconnectOnExitCheckBox.IsEnabled = featureUsable;
     }
 
     private async Task CompleteUsbHostFeatureReactivationAsync(int token)
@@ -4614,16 +4965,9 @@ internal sealed class GuestMainWindow : Window
         });
 
         button.Content = content;
-        button.Click += (_, _) =>
+        button.Click += async (_, _) =>
         {
-            if (_selectedMenuIndex == index)
-            {
-                return;
-            }
-
-            _selectedMenuIndex = index;
-            UpdateNavSelection();
-            UpdatePageContent();
+            await SelectMenuIndexAsync(index);
         };
 
         _navButtons.Add(button);

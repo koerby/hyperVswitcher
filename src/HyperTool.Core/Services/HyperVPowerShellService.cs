@@ -580,97 +580,115 @@ public sealed class HyperVPowerShellService : IHyperVService
         progress?.Report(100);
     }
 
-    public async Task<ImportVmResult> ImportVmAsync(string importPath, string destinationPath, IProgress<int>? progress, CancellationToken cancellationToken)
+    public async Task<ImportVmResult> ImportVmAsync(
+        string importPath,
+        string destinationPath,
+        string? requestedVmName,
+        string? requestedFolderName,
+        string importMode,
+        IProgress<int>? progress,
+        CancellationToken cancellationToken)
     {
         var script = $"$importPath = {ToPsSingleQuoted(importPath)}; " +
                      $"$destinationPath = {ToPsSingleQuoted(destinationPath)}; " +
+                     $"$requestedVmName = {ToPsSingleQuoted(requestedVmName ?? string.Empty)}; " +
+                     $"$requestedFolderName = {ToPsSingleQuoted(requestedFolderName ?? string.Empty)}; " +
+                     $"$importMode = {ToPsSingleQuoted(importMode ?? string.Empty)}.ToLowerInvariant(); " +
                      "if (-not (Test-Path -LiteralPath $importPath)) { throw \"Import-Pfad nicht gefunden: $importPath\" }; " +
                      "if ([string]::IsNullOrWhiteSpace($destinationPath)) { throw \"Zielpfad für den Import fehlt.\" }; " +
                      "if (-not (Test-Path -LiteralPath $destinationPath -PathType Container)) { New-Item -Path $destinationPath -ItemType Directory -Force | Out-Null }; " +
+                     "if (@('copy','register','restore') -notcontains $importMode) { $importMode = 'copy' }; " +
                      "$existingVms = @(Get-VM -ErrorAction SilentlyContinue); " +
                      "$existingVmNames = @($existingVms | Select-Object -ExpandProperty Name); " +
                      "$existingVmIds = @($existingVms | Select-Object -ExpandProperty Id); " +
                      "function Get-UniqueVmName([string]$baseName, [string[]]$reservedNames) { " +
                      "if ([string]::IsNullOrWhiteSpace($baseName)) { $baseName = 'Imported-VM' }; " +
-                     "$candidate = $baseName; " +
-                     "$index = 1; " +
+                     "$candidate = $baseName; $index = 1; " +
                      "while ($reservedNames | Where-Object { $_ -ceq $candidate }) { $candidate = $baseName + '-' + $index; $index++ }; " +
-                     "return $candidate " +
-                     "}; " +
+                     "return $candidate }; " +
+                     "function Normalize-FolderName([string]$value) { " +
+                     "$name = if ([string]::IsNullOrWhiteSpace($value)) { '' } else { $value.Trim() }; " +
+                     "if ([string]::IsNullOrWhiteSpace($name)) { return '' }; " +
+                     "$name = [regex]::Replace($name, '[<>:/\\|?*]', '_'); " +
+                     "$name = $name.Trim('. ').Trim(); " +
+                     "if ([string]::IsNullOrWhiteSpace($name)) { return '' }; return $name }; " +
+                     "function Get-UniqueFolderPath([string]$rootPath, [string]$baseName) { " +
+                     "$cleanBase = Normalize-FolderName $baseName; if ([string]::IsNullOrWhiteSpace($cleanBase)) { $cleanBase = 'Imported-VM' }; " +
+                     "$candidate = Join-Path $rootPath $cleanBase; $index = 1; " +
+                     "while (Test-Path -LiteralPath $candidate -PathType Container) { $candidate = Join-Path $rootPath ($cleanBase + '-' + $index); $index++ }; " +
+                     "return $candidate }; " +
                      "$destinationRoot = $destinationPath; " +
                      "if ([System.IO.Path]::GetFullPath($importPath).TrimEnd('\\') -eq [System.IO.Path]::GetFullPath($destinationRoot).TrimEnd('\\')) { $destinationRoot = Join-Path $destinationRoot ('Imported-' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }; " +
-                     "$vmStoragePath = Join-Path $destinationRoot ('VM-' + [Guid]::NewGuid().ToString('N').Substring(0,8)); " +
-                     "if (-not (Test-Path -LiteralPath $vmStoragePath -PathType Container)) { New-Item -Path $vmStoragePath -ItemType Directory -Force | Out-Null }; " +
+                     "$vmStoragePath = ''; " +
                      "$configPath = $importPath; " +
                      "if (Test-Path -LiteralPath $importPath -PathType Container) { " +
-                     "$configFile = Get-ChildItem -LiteralPath $importPath -Recurse -File | " +
-                     "Where-Object { $_.Extension -in '.vmcx', '.xml' } | " +
-                     "Sort-Object LastWriteTime -Descending | " +
-                     "Select-Object -First 1; " +
+                     "$configFile = Get-ChildItem -LiteralPath $importPath -Recurse -File | Where-Object { $_.Extension -in '.vmcx', '.xml' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1; " +
                      "if ($null -eq $configFile) { throw \"Keine VM-Konfigurationsdatei (.vmcx/.xml) im Ordner gefunden.\" }; " +
-                     "$configPath = $configFile.FullName; " +
-                     "}; " +
-                     "$job = Import-VM -Path $configPath -Copy -GenerateNewId -VirtualMachinePath $vmStoragePath -VhdDestinationPath $vmStoragePath -SnapshotFilePath $vmStoragePath -SmartPagingFilePath $vmStoragePath -Confirm:$false -AsJob; " +
+                     "$configPath = $configFile.FullName; }; " +
+                     "if ($importMode -eq 'copy') { " +
+                     "$baseFolderName = if (-not [string]::IsNullOrWhiteSpace($requestedFolderName)) { $requestedFolderName } elseif (-not [string]::IsNullOrWhiteSpace($requestedVmName)) { $requestedVmName } else { [System.IO.Path]::GetFileNameWithoutExtension($configPath) }; " +
+                     "$vmStoragePath = Get-UniqueFolderPath $destinationRoot $baseFolderName; " +
+                     "$virtualMachinePath = Join-Path $vmStoragePath 'Virtual Machines'; " +
+                     "$snapshotPath = Join-Path $vmStoragePath 'Snapshots'; " +
+                     "$vhdPath = Join-Path $vmStoragePath 'Virtual Disks'; " +
+                     "$smartPagingPath = Join-Path $vmStoragePath 'Smart Paging'; " +
+                     "foreach ($path in @($vmStoragePath, $virtualMachinePath, $snapshotPath, $vhdPath, $smartPagingPath)) { if (-not (Test-Path -LiteralPath $path -PathType Container)) { New-Item -Path $path -ItemType Directory -Force | Out-Null } }; " +
+                     "$job = Import-VM -Path $configPath -Copy -GenerateNewId -VirtualMachinePath $virtualMachinePath -VhdDestinationPath $vhdPath -SnapshotFilePath $snapshotPath -SmartPagingFilePath $smartPagingPath -Confirm:$false -AsJob; " +
+                     "} elseif ($importMode -eq 'register') { $job = Import-VM -Path $configPath -Register -Confirm:$false -AsJob; } " +
+                     "else { $job = Import-VM -Path $configPath -Confirm:$false -AsJob; }; " +
                      "if ($null -eq $job) { throw 'Import-Job konnte nicht gestartet werden.' }; " +
                      "$lastProgress = -1; " +
                      "while ($true) { " +
-                     "$job = Get-Job -Id $job.Id -ErrorAction SilentlyContinue; " +
-                     "if ($null -eq $job) { break }; " +
+                     "$job = Get-Job -Id $job.Id -ErrorAction SilentlyContinue; if ($null -eq $job) { break }; " +
                      "if ($job.State -ne 'Running' -and $job.State -ne 'NotStarted') { break }; " +
-                     "$percent = 0; " +
+                     "$percent = $null; " +
                      "if ($job.ChildJobs.Count -gt 0) { $progressRecord = $job.ChildJobs[0].Progress | Select-Object -Last 1; if ($null -ne $progressRecord -and $null -ne $progressRecord.PercentComplete) { $percent = [int]$progressRecord.PercentComplete } }; " +
+                     "if ($null -eq $percent) { Start-Sleep -Milliseconds 500; continue }; " +
+                     "if ($percent -gt 99) { $percent = 99 }; " +
                      "if ($percent -ne $lastProgress) { Write-Output ('HT_PROGRESS:' + $percent); $lastProgress = $percent }; " +
-                     "Start-Sleep -Milliseconds 500 " +
-                     "}; " +
-                     "Wait-Job -Id $job.Id | Out-Null; " +
-                     "$job = Get-Job -Id $job.Id; " +
+                     "Start-Sleep -Milliseconds 500 }; " +
+                     "Wait-Job -Id $job.Id | Out-Null; $job = Get-Job -Id $job.Id; " +
                      "if ($job.State -ne 'Completed') { " +
                      "$reason = ($job.ChildJobs | ForEach-Object { if ($null -ne $_.JobStateInfo -and $null -ne $_.JobStateInfo.Reason) { $_.JobStateInfo.Reason.Message } }) -join '; '; " +
                      "if ([string]::IsNullOrWhiteSpace($reason)) { $reason = (Receive-Job -Id $job.Id -Keep 2>&1 | Out-String) }; " +
-                     "if ($reason -match 'same name|gleichen Namen|bereits vorhanden|already exists') { $reason = $reason + ' | Hinweis: HyperTool versucht Konflikte per Suffix zu vermeiden. Bitte Importquelle prüfen.' }; " +
-                     "Remove-Job -Id $job.Id -Force -ErrorAction SilentlyContinue; " +
-                     "throw $reason " +
-                     "}; " +
+                     "Remove-Job -Id $job.Id -Force -ErrorAction SilentlyContinue; throw $reason }; " +
                      "$jobOutput = @(Receive-Job -Id $job.Id -Keep 2>&1); " +
                      "$importedVm = $jobOutput | Where-Object { $_ -is [Microsoft.HyperV.PowerShell.VirtualMachine] } | Select-Object -First 1; " +
-                     "if ($null -eq $importedVm) { " +
-                     "$newVmCandidates = @(Get-VM -ErrorAction SilentlyContinue | Where-Object { $existingVmIds -notcontains $_.Id }); " +
-                     "if ($newVmCandidates.Count -gt 0) { $importedVm = $newVmCandidates | Select-Object -First 1 } " +
-                     "}; " +
+                     "if ($null -eq $importedVm) { $newVmCandidates = @(Get-VM -ErrorAction SilentlyContinue | Where-Object { $existingVmIds -notcontains $_.Id }); if ($newVmCandidates.Count -gt 0) { $importedVm = $newVmCandidates | Select-Object -First 1 } }; " +
                      "Remove-Job -Id $job.Id -Force -ErrorAction SilentlyContinue; " +
                      "if ($null -eq $importedVm) { throw \"Import-VM hat keine VM zurückgegeben.\" }; " +
                      "$importedName = if ($null -ne $importedVm.Name) { $importedVm.Name } else { '' }; " +
-                     "$renamed = $false; " +
-                     "$originalName = $importedName; " +
-                     "if (-not [string]::IsNullOrWhiteSpace($importedName) -and ($existingVmNames | Where-Object { $_ -ceq $importedName })) { " +
+                     "$renamed = $false; $originalName = $importedName; " +
+                     "if (-not [string]::IsNullOrWhiteSpace($requestedVmName)) { " +
+                     "$targetName = Get-UniqueVmName $requestedVmName @($existingVmNames + $importedName); " +
+                     "if (-not [string]::IsNullOrWhiteSpace($targetName) -and $targetName -cne $importedName) { Rename-VM -VM $importedVm -NewName $targetName -Confirm:$false -ErrorAction Stop; $importedName = $targetName; $renamed = $true } " +
+                     "} elseif (-not [string]::IsNullOrWhiteSpace($importedName) -and ($existingVmNames | Where-Object { $_ -ceq $importedName })) { " +
                      "$targetName = Get-UniqueVmName ($importedName + '-import') @($existingVmNames + $importedName); " +
-                     "Rename-VM -VM $importedVm -NewName $targetName -Confirm:$false -ErrorAction Stop; " +
-                     "$importedName = $targetName; " +
-                     "$renamed = $true; " +
-                     "}; " +
+                     "Rename-VM -VM $importedVm -NewName $targetName -Confirm:$false -ErrorAction Stop; $importedName = $targetName; $renamed = $true }; " +
                      "Write-Output 'HT_PROGRESS:100'; " +
                      "Write-Output ('HT_RESULT:' + $importedName); " +
                      "Write-Output ('HT_ORIGINAL:' + $originalName); " +
-                     "Write-Output ('HT_RENAMED:' + $renamed)";
+                     "Write-Output ('HT_RENAMED:' + $renamed); " +
+                     "Write-Output ('HT_DESTINATION:' + $vmStoragePath); " +
+                     "Write-Output ('HT_MODE:' + $importMode)";
 
         progress?.Report(0);
         var output = await InvokePowerShellWithProgressAsync(script, progress, cancellationToken);
         progress?.Report(100);
 
-        var importedName = output
-            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Trim())
-            .LastOrDefault(line => line.StartsWith("HT_RESULT:", StringComparison.Ordinal));
+        static string? GetResultToken(string source, string prefix)
+        {
+            return source
+                .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .LastOrDefault(line => line.StartsWith(prefix, StringComparison.Ordinal));
+        }
 
-        var originalName = output
-            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Trim())
-            .LastOrDefault(line => line.StartsWith("HT_ORIGINAL:", StringComparison.Ordinal));
-
-        var renamedFlag = output
-            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Trim())
-            .LastOrDefault(line => line.StartsWith("HT_RENAMED:", StringComparison.Ordinal));
+        var importedName = GetResultToken(output, "HT_RESULT:");
+        var originalName = GetResultToken(output, "HT_ORIGINAL:");
+        var renamedFlag = GetResultToken(output, "HT_RENAMED:");
+        var destinationFolder = GetResultToken(output, "HT_DESTINATION:");
+        var importModeResult = GetResultToken(output, "HT_MODE:");
 
         if (string.IsNullOrWhiteSpace(importedName))
         {
@@ -689,7 +707,9 @@ public sealed class HyperVPowerShellService : IHyperVService
         {
             VmName = resolvedImportedName,
             OriginalName = resolvedOriginalName,
-            RenamedDueToConflict = renamedDueToConflict
+            RenamedDueToConflict = renamedDueToConflict,
+            DestinationFolderPath = string.IsNullOrWhiteSpace(destinationFolder) ? string.Empty : destinationFolder["HT_DESTINATION:".Length..].Trim(),
+            ImportMode = string.IsNullOrWhiteSpace(importModeResult) ? string.Empty : importModeResult["HT_MODE:".Length..].Trim()
         };
     }
 

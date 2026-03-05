@@ -7,4 +7,8 @@ public sealed class ImportVmResult
     public bool RenamedDueToConflict { get; set; }
 
     public string OriginalName { get; set; } = string.Empty;
+
+    public string DestinationFolderPath { get; set; } = string.Empty;
+
+    public string ImportMode { get; set; } = string.Empty;
 }

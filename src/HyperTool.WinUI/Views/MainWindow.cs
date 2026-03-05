@@ -13,7 +13,6 @@ using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Shapes;
-using Microsoft.Win32;
 using Serilog;
 using System.Linq;
 using System.ComponentModel;
@@ -36,7 +35,7 @@ namespace HyperTool.WinUI.Views;
 public sealed class MainWindow : Window
 {
     public const int DefaultWindowWidth = 1400;
-    public const int DefaultWindowHeight = 940;
+    public const int DefaultWindowHeight = 950;
     private const string ToolRestartIcon = "↻";
     private const string ToolRestartLabel = "Tool neu starten";
     private const string HostUsbRuntimeOwner = "dorssel";
@@ -58,6 +57,8 @@ public sealed class MainWindow : Window
         HorizontalScrollMode = ScrollMode.Enabled,
         VerticalScrollMode = ScrollMode.Disabled
     };
+    private readonly Border _vmChipLeftFadeOverlay = new() { Width = 26, HorizontalAlignment = HorizontalAlignment.Left, IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+    private readonly Border _vmChipRightFadeOverlay = new() { Width = 26, HorizontalAlignment = HorizontalAlignment.Right, IsHitTestVisible = false, Visibility = Visibility.Collapsed };
     private readonly Button _vmChipsLeftButton = new();
     private readonly Button _vmChipsRightButton = new();
     private readonly ContentPresenter _pageContent = new();
@@ -78,6 +79,8 @@ public sealed class MainWindow : Window
     private readonly ListView _sharedFoldersListView = new();
     private readonly Ellipse _sharedFolderFileServiceStatusDot = new() { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _sharedFolderFileServiceStatusText = new() { Opacity = 0.9, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Border _selectedVmStateChip = new() { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(10, 3, 10, 3), VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _selectedVmStateChipText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBox _sharedFolderPathTextBox = new();
     private readonly TextBox _sharedFolderShareNameTextBox = new();
     private readonly CheckBox _sharedFolderReadOnlyCheckBox = new() { Content = "Freigabe nur Lesen" };
@@ -86,32 +89,29 @@ public sealed class MainWindow : Window
     private Button? _sharedFolderNewButton;
     private Button? _sharedFolderSaveButton;
     private Button? _sharedFolderDeleteButton;
-    private Button? _sharedFolderSelfTestButton;
     private Button? _sharedFolderFileServiceInstallButton;
     private string _sharedFolderEditingId = string.Empty;
     private string _sharedFolderLastError = "-";
     private readonly SemaphoreSlim _sharedFolderEnabledToggleGate = new(1, 1);
     private bool _sharedFolderCollectionHandlersAttached;
     private readonly CheckBox _usbAutoShareCheckBox = new();
-    private readonly CheckBox _usbHostFeatureEnabledCheckBox = new() { Content = "USB Share global aktiv (Host)" };
+    private readonly CheckBox _usbAutoDetachOnDisconnectCheckBox = new();
+    private readonly CheckBox _usbUnshareOnExitCheckBox = new();
+    private readonly ToggleSwitch _usbHostFeatureEnabledToggleSwitch = new() { Header = null, OffContent = "", OnContent = "" };
     private readonly Border _usbHostFeatureStatusChip = new() { CornerRadius = new CornerRadius(9), MinHeight = 30, BorderThickness = new Thickness(1), Padding = new Thickness(10, 5, 10, 5), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _usbHostFeatureStatusChipText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private readonly TextBlock _usbDisabledOverlayText = new() { Text = "Deaktiviert", Opacity = 0.34, FontSize = 34, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
     private StackPanel? _usbFeatureControlsPanel;
-    private readonly CheckBox _sharedFolderHostFeatureEnabledCheckBox = new() { Content = "Shared Folder global aktiv (Host)" };
+    private readonly ToggleSwitch _sharedFolderHostFeatureEnabledToggleSwitch = new() { Header = null, OffContent = "", OnContent = "" };
     private readonly Border _sharedFolderHostFeatureStatusChip = new() { CornerRadius = new CornerRadius(9), MinHeight = 30, BorderThickness = new Thickness(1), Padding = new Thickness(10, 5, 10, 5), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _sharedFolderHostFeatureStatusChipText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private readonly TextBlock _sharedFolderDisabledOverlayText = new() { Text = "Deaktiviert", Opacity = 0.34, FontSize = 34, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
     private readonly Ellipse _usbRuntimeStatusDot = new() { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _usbRuntimeStatusText = new() { Opacity = 0.9, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _usbRuntimeHintText = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.9 };
-    private readonly Border _usbRemoteFxPolicyStatusChip = new() { CornerRadius = new CornerRadius(9), MinHeight = 30, BorderThickness = new Thickness(1), Padding = new Thickness(10, 5, 10, 5), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBlock _usbRemoteFxPolicyStatusChipText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private readonly TextBlock _usbRemoteFxPolicyHintText = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.9 };
-    private readonly CheckBox _usbRemoteFxPolicyEnabledCheckBox = new() { Content = "RemoteFX USB Redirection aktiv (Policy)" };
     private Button? _usbRuntimeInstallButton;
     private Button? _usbRuntimeRestartButton;
-    private Button? _usbRemoteFxPolicyRefreshButton;
     private Button? _usbRefreshButton;
     private Button? _usbShareButton;
     private Button? _usbUnshareButton;
@@ -133,9 +133,6 @@ public sealed class MainWindow : Window
     private TextBlock? _themeTransitionStatusText;
     private bool _isMainLayoutLoaded;
     private bool _isThemeRestartInProgress;
-    private bool _usbRemoteFxPolicyKnown;
-    private bool _usbRemoteFxPolicyActive;
-    private bool _suppressRemoteFxPolicyToggleEvents;
     private DispatcherQueueTimer? _startupStatusTimer;
     private TextBlock? _startupStatusText;
     private int _startupStatusIndex;
@@ -144,9 +141,6 @@ public sealed class MainWindow : Window
     private DispatcherQueueTimer? _vmChipRefreshDebounceTimer;
     private string _vmChipRefreshSignature = string.Empty;
     private bool _suppressHostFeatureToggleEvents;
-    private const string RemoteFxUsbPolicyClientPath = @"SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services\Client";
-    private const string RemoteFxUsbPolicyLegacyPath = @"SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services";
-    private const string RemoteFxUsbPolicyValuePrefix = "fEnableUsb";
 
     public MainWindow(IThemeService themeService, MainViewModel viewModel, bool showStartupSplash = false)
     {
@@ -1370,7 +1364,9 @@ public sealed class MainWindow : Window
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var headerCard = CreateCard(new Thickness(16, 16, 16, 0), 14, 14);
-        var headerGrid = new Grid();
+        var headerGrid = new Grid { RowSpacing = 8 };
+        headerGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        headerGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -1396,23 +1392,23 @@ public sealed class MainWindow : Window
         _vmChipScrollViewer.SizeChanged += (_, _) => UpdateVmChipNavigationButtons();
         _vmChipPanel.SizeChanged += (_, _) => UpdateVmChipNavigationButtons();
 
-        _vmChipsLeftButton.Content = "◀";
-        _vmChipsLeftButton.Width = 30;
-        _vmChipsLeftButton.Height = 30;
+        _vmChipsLeftButton.Content = new FontIcon { Glyph = "\uE76B", FontSize = 13 };
+        _vmChipsLeftButton.Width = 34;
+        _vmChipsLeftButton.Height = 34;
         _vmChipsLeftButton.CornerRadius = new CornerRadius(8);
         _vmChipsLeftButton.BorderThickness = new Thickness(1);
         _vmChipsLeftButton.BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush;
-        _vmChipsLeftButton.Background = Application.Current.Resources["PanelBackgroundBrush"] as Brush;
+        _vmChipsLeftButton.Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush;
         _vmChipsLeftButton.Visibility = Visibility.Collapsed;
         _vmChipsLeftButton.Click += (_, _) => ScrollVmChipsBy(-280);
 
-        _vmChipsRightButton.Content = "▶";
-        _vmChipsRightButton.Width = 30;
-        _vmChipsRightButton.Height = 30;
+        _vmChipsRightButton.Content = new FontIcon { Glyph = "\uE76C", FontSize = 13 };
+        _vmChipsRightButton.Width = 34;
+        _vmChipsRightButton.Height = 34;
         _vmChipsRightButton.CornerRadius = new CornerRadius(8);
         _vmChipsRightButton.BorderThickness = new Thickness(1);
         _vmChipsRightButton.BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush;
-        _vmChipsRightButton.Background = Application.Current.Resources["PanelBackgroundBrush"] as Brush;
+        _vmChipsRightButton.Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush;
         _vmChipsRightButton.Visibility = Visibility.Collapsed;
         _vmChipsRightButton.Click += (_, _) => ScrollVmChipsBy(280);
 
@@ -1420,13 +1416,22 @@ public sealed class MainWindow : Window
         chipNavigationGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         chipNavigationGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         chipNavigationGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var chipScrollerHost = new Grid();
+        chipScrollerHost.Children.Add(_vmChipScrollViewer);
+        chipScrollerHost.Children.Add(_vmChipLeftFadeOverlay);
+        chipScrollerHost.Children.Add(_vmChipRightFadeOverlay);
+
         chipNavigationGrid.Children.Add(_vmChipsLeftButton);
-        Grid.SetColumn(_vmChipScrollViewer, 1);
-        chipNavigationGrid.Children.Add(_vmChipScrollViewer);
+        Grid.SetColumn(chipScrollerHost, 1);
+        chipNavigationGrid.Children.Add(chipScrollerHost);
         Grid.SetColumn(_vmChipsRightButton, 2);
         chipNavigationGrid.Children.Add(_vmChipsRightButton);
 
-        titleStack.Children.Add(chipNavigationGrid);
+        Grid.SetRow(chipNavigationGrid, 1);
+        Grid.SetColumn(chipNavigationGrid, 0);
+        Grid.SetColumnSpan(chipNavigationGrid, 2);
+        chipNavigationGrid.Margin = new Thickness(0, 2, 0, 0);
         headerGrid.Children.Add(titleStack);
 
         var titleActions = new StackPanel
@@ -1481,8 +1486,10 @@ public sealed class MainWindow : Window
         logoBorder.Tapped += (_, _) => RunLogoEasterEgg();
         titleActions.Children.Add(logoBorder);
 
+        Grid.SetRow(titleActions, 0);
         Grid.SetColumn(titleActions, 1);
         headerGrid.Children.Add(titleActions);
+        headerGrid.Children.Add(chipNavigationGrid);
         headerCard.Child = headerGrid;
         Grid.SetRow(headerCard, 0);
         root.Children.Add(headerCard);
@@ -1554,10 +1561,10 @@ public sealed class MainWindow : Window
         var stateLabel = new TextBlock { Text = "State", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
         Grid.SetColumn(stateLabel, 2);
         selectedVmGrid.Children.Add(stateLabel);
-        var stateText = new TextBlock();
-        stateText.SetBinding(TextBlock.TextProperty, new Binding { Source = _viewModel, Path = new PropertyPath(nameof(MainViewModel.SelectedVmState)) });
-        Grid.SetColumn(stateText, 3);
-        selectedVmGrid.Children.Add(stateText);
+        _selectedVmStateChipText.SetBinding(TextBlock.TextProperty, new Binding { Source = _viewModel, Path = new PropertyPath(nameof(MainViewModel.SelectedVmState)) });
+        _selectedVmStateChip.Child = _selectedVmStateChipText;
+        Grid.SetColumn(_selectedVmStateChip, 3);
+        selectedVmGrid.Children.Add(_selectedVmStateChip);
         var networkLabel = new TextBlock { Text = "Network", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
         Grid.SetColumn(networkLabel, 4);
         selectedVmGrid.Children.Add(networkLabel);
@@ -1570,6 +1577,7 @@ public sealed class MainWindow : Window
 
         _vmPage = BuildVmPage();
         _infoPage = BuildInfoPage();
+        UpdateSelectedVmStateChip();
         UpdatePageContent();
         Grid.SetRow(_pageContent, 2);
         contentGrid.Children.Add(_pageContent);
@@ -1946,11 +1954,6 @@ public sealed class MainWindow : Window
         vmOverviewStack.Children.Add(new TextBlock { Text = "Ausgewählte VM", Opacity = 0.9, Foreground = Application.Current.Resources["TextMutedBrush"] as Brush });
         vmOverviewStack.Children.Add(selectedVmText);
 
-        var defaultVmText = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        defaultVmText.SetBinding(TextBlock.TextProperty, new Binding { Source = _viewModel, Path = new PropertyPath(nameof(MainViewModel.DefaultVmName)) });
-        vmOverviewStack.Children.Add(new TextBlock { Text = "Default VM", Opacity = 0.9, Foreground = Application.Current.Resources["TextMutedBrush"] as Brush, Margin = new Thickness(0, 2, 0, 0) });
-        vmOverviewStack.Children.Add(defaultVmText);
-
         var trayAdapterRow = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
         trayAdapterRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
         trayAdapterRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -2029,23 +2032,79 @@ public sealed class MainWindow : Window
         vmGrid.Children.Add(adapterCard);
         vmStack.Children.Add(vmGrid);
 
+        var importOptionsCard = new Border
+        {
+            BorderThickness = new Thickness(1),
+            BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
+            Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(10)
+        };
+
+        var importOptionsStack = new StackPanel { Spacing = 8 };
+        importOptionsStack.Children.Add(new TextBlock
+        {
+            Text = "VM-Import Optionen",
+            Opacity = 0.95,
+            Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
+        });
+
+        var importModeGrid = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        importModeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
+        importModeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        importModeGrid.Children.Add(new TextBlock
+        {
+            Text = "Importmodus",
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
+        });
+        var importModeCombo = CreateStyledComboBox();
+        importModeCombo.MinHeight = 38;
+        importModeCombo.ItemsSource = _viewModel.VmImportModeOptions;
+        importModeCombo.DisplayMemberPath = nameof(VmImportModeOption.Label);
+        importModeCombo.SelectedItem = _viewModel.SelectedVmImportModeOption;
+        importModeCombo.SelectionChanged += (_, _) => _viewModel.SelectedVmImportModeOption = importModeCombo.SelectedItem as VmImportModeOption;
+        Grid.SetColumn(importModeCombo, 1);
+        importModeGrid.Children.Add(importModeCombo);
+        importOptionsStack.Children.Add(importModeGrid);
+
+        var importNameGrid = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        importNameGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
+        importNameGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        importNameGrid.Children.Add(new TextBlock
+        {
+            Text = "VM-Name (optional)",
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
+        });
+        var importVmNameTextBox = CreateStyledTextBox(_viewModel.ImportVmRequestedName, "z. B. Dev-VM");
+        importVmNameTextBox.TextChanged += (_, _) => _viewModel.ImportVmRequestedName = importVmNameTextBox.Text;
+        Grid.SetColumn(importVmNameTextBox, 1);
+        importNameGrid.Children.Add(importVmNameTextBox);
+        importOptionsStack.Children.Add(importNameGrid);
+
+        var importFolderGrid = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        importFolderGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
+        importFolderGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        importFolderGrid.Children.Add(new TextBlock
+        {
+            Text = "Ordnername (optional)",
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
+        });
+        var importFolderNameTextBox = CreateStyledTextBox(_viewModel.ImportVmRequestedFolderName, "z. B. Dev-VM-Import");
+        importFolderNameTextBox.TextChanged += (_, _) => _viewModel.ImportVmRequestedFolderName = importFolderNameTextBox.Text;
+        Grid.SetColumn(importFolderNameTextBox, 1);
+        importFolderGrid.Children.Add(importFolderNameTextBox);
+        importOptionsStack.Children.Add(importFolderGrid);
+
+        importOptionsCard.Child = importOptionsStack;
+        vmStack.Children.Add(importOptionsCard);
+
         var vmButtonsGrid = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 2, 0, 0) };
         vmButtonsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        vmButtonsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        vmButtonsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        var setDefaultButton = CreateIconButton("⭐", "Ausgewählte als Default", _viewModel.SetDefaultVmCommand);
-        setDefaultButton.HorizontalAlignment = HorizontalAlignment.Stretch;
-        vmButtonsGrid.Children.Add(setDefaultButton);
-
-        var exportButton = CreateIconButton("💾", "Ausgewählte VM exportieren", _viewModel.ExportSelectedVmCommand);
-        exportButton.HorizontalAlignment = HorizontalAlignment.Stretch;
-        Grid.SetColumn(exportButton, 1);
-        vmButtonsGrid.Children.Add(exportButton);
-
         var importButton = CreateIconButton("📥", "VM importieren", _viewModel.ImportVmCommand);
         importButton.HorizontalAlignment = HorizontalAlignment.Stretch;
-        Grid.SetColumn(importButton, 2);
         vmButtonsGrid.Children.Add(importButton);
 
         vmStack.Children.Add(vmButtonsGrid);
@@ -2064,9 +2123,11 @@ public sealed class MainWindow : Window
         var systemStack = new StackPanel { Spacing = 10 };
         systemStack.Children.Add(new TextBlock { Text = "System & Updates", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 16 });
 
-        var quickTogglesGrid = new Grid { ColumnSpacing = 10, RowSpacing = 6 };
+        var quickTogglesGrid = new Grid { ColumnSpacing = 26, RowSpacing = 6, HorizontalAlignment = HorizontalAlignment.Left };
+        quickTogglesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        quickTogglesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         quickTogglesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        quickTogglesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        quickTogglesGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         quickTogglesGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         quickTogglesGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -2094,16 +2155,13 @@ public sealed class MainWindow : Window
         Grid.SetRow(startWithWindowsCheck, 1);
         quickTogglesGrid.Children.Add(startWithWindowsCheck);
 
-        systemStack.Children.Add(quickTogglesGrid);
-
-        var displayAndUpdatesRow = new Grid { ColumnSpacing = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0) };
-        displayAndUpdatesRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        displayAndUpdatesRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        var themeRow = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        themeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
-        themeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        themeRow.Children.Add(new TextBlock
+        var themeInlineRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        themeInlineRow.Children.Add(new TextBlock
         {
             Text = "Dark Mode",
             VerticalAlignment = VerticalAlignment.Center,
@@ -2122,19 +2180,19 @@ public sealed class MainWindow : Window
         {
             _viewModel.UiTheme = themeToggle.IsOn ? "Dark" : "Light";
         };
-        Grid.SetColumn(themeToggle, 1);
-        themeRow.Children.Add(themeToggle);
-
-        Grid.SetColumn(themeRow, 0);
-        displayAndUpdatesRow.Children.Add(themeRow);
+        themeInlineRow.Children.Add(themeToggle);
+        Grid.SetColumn(themeInlineRow, 0);
+        Grid.SetRow(themeInlineRow, 2);
+        quickTogglesGrid.Children.Add(themeInlineRow);
 
         var updateCheck = CreateCheckBox("Beim Start auf Updates prüfen", () => _viewModel.UpdateCheckOnStartup, value => _viewModel.UpdateCheckOnStartup = value);
         updateCheck.HorizontalAlignment = HorizontalAlignment.Left;
         updateCheck.Margin = new Thickness(0);
         Grid.SetColumn(updateCheck, 1);
-        displayAndUpdatesRow.Children.Add(updateCheck);
+        Grid.SetRow(updateCheck, 2);
+        quickTogglesGrid.Children.Add(updateCheck);
 
-        systemStack.Children.Add(displayAndUpdatesRow);
+        systemStack.Children.Add(quickTogglesGrid);
 
         var hostRow = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0) };
         hostRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
@@ -2411,21 +2469,31 @@ public sealed class MainWindow : Window
         headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        headerRow.Children.Add(new TextBlock
+        var headerLeft = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 14,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        _usbHostFeatureEnabledToggleSwitch.Toggled += async (_, _) => await OnHostUsbFeatureToggleChangedAsync(_usbHostFeatureEnabledToggleSwitch.IsOn);
+        _usbHostFeatureEnabledToggleSwitch.IsOn = _viewModel.HostUsbSharingEnabled;
+        _usbHostFeatureEnabledToggleSwitch.MinWidth = 54;
+        _usbHostFeatureEnabledToggleSwitch.VerticalAlignment = VerticalAlignment.Center;
+        headerLeft.Children.Add(_usbHostFeatureEnabledToggleSwitch);
+
+        headerLeft.Children.Add(new TextBlock
         {
             Text = "USB-Share (USB/IPD als Dienst im Hintergrund)",
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center
         });
+        headerRow.Children.Add(headerLeft);
 
         _usbHostFeatureStatusChip.Child = _usbHostFeatureStatusChipText;
         Grid.SetColumn(_usbHostFeatureStatusChip, 1);
         headerRow.Children.Add(_usbHostFeatureStatusChip);
         actionsStack.Children.Add(headerRow);
-
-        _usbHostFeatureEnabledCheckBox.Checked += async (_, _) => await OnHostUsbFeatureToggleChangedAsync(true);
-        _usbHostFeatureEnabledCheckBox.Unchecked += async (_, _) => await OnHostUsbFeatureToggleChangedAsync(false);
-        _usbHostFeatureEnabledCheckBox.Content = "USB Share aktiv";
-        _usbHostFeatureEnabledCheckBox.IsChecked = _viewModel.HostUsbSharingEnabled;
 
         _usbFeatureControlsPanel = new StackPanel { Spacing = 4 };
 
@@ -2444,18 +2512,18 @@ public sealed class MainWindow : Window
         actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         _usbRefreshButton = CreateIconButton("⟳", "Refresh", _viewModel.RefreshUsbDevicesCommand);
         _usbShareButton = CreateIconButton("🔓", "Share", _viewModel.BindUsbDeviceCommand);
         _usbUnshareButton = CreateIconButton("🔒", "Unshare", _viewModel.UnbindUsbDeviceCommand);
 
-        actionRow.Children.Add(_usbHostFeatureEnabledCheckBox);
-        Grid.SetColumn(_usbRefreshButton, 1);
+        Grid.SetColumn(_usbRefreshButton, 0);
         actionRow.Children.Add(_usbRefreshButton);
-        Grid.SetColumn(_usbShareButton, 2);
+        Grid.SetColumn(_usbShareButton, 1);
         actionRow.Children.Add(_usbShareButton);
-        Grid.SetColumn(_usbUnshareButton, 3);
+        Grid.SetColumn(_usbUnshareButton, 2);
         actionRow.Children.Add(_usbUnshareButton);
 
         _usbFeatureControlsPanel.Children.Add(actionRow);
@@ -2468,57 +2536,39 @@ public sealed class MainWindow : Window
         _usbAutoShareCheckBox.IsEnabled = _viewModel.SelectedUsbDevice is not null && _viewModel.UsbRuntimeAvailable;
         _usbAutoShareCheckBox.Checked += (_, _) => _viewModel.SelectedUsbDeviceAutoShareEnabled = true;
         _usbAutoShareCheckBox.Unchecked += (_, _) => _viewModel.SelectedUsbDeviceAutoShareEnabled = false;
-        Grid.SetColumn(_usbAutoShareCheckBox, 4);
+        Grid.SetColumn(_usbAutoShareCheckBox, 3);
         actionRow.Children.Add(_usbAutoShareCheckBox);
+
+        _usbAutoDetachOnDisconnectCheckBox.Content = "Automatisches Detach nach Disconnect";
+        _usbAutoDetachOnDisconnectCheckBox.Margin = new Thickness(6, 0, 0, 0);
+        _usbAutoDetachOnDisconnectCheckBox.VerticalAlignment = VerticalAlignment.Center;
+        _usbAutoDetachOnDisconnectCheckBox.HorizontalAlignment = HorizontalAlignment.Left;
+        _usbAutoDetachOnDisconnectCheckBox.IsChecked = _viewModel.UsbAutoDetachOnClientDisconnect;
+        _usbAutoDetachOnDisconnectCheckBox.Checked += (_, _) => _viewModel.UsbAutoDetachOnClientDisconnect = true;
+        _usbAutoDetachOnDisconnectCheckBox.Unchecked += (_, _) => _viewModel.UsbAutoDetachOnClientDisconnect = false;
+        Grid.SetColumn(_usbAutoDetachOnDisconnectCheckBox, 4);
+        actionRow.Children.Add(_usbAutoDetachOnDisconnectCheckBox);
+
+        _usbUnshareOnExitCheckBox.Content = "Beim Beenden Share aufheben";
+        _usbUnshareOnExitCheckBox.Margin = new Thickness(6, 0, 0, 0);
+        _usbUnshareOnExitCheckBox.VerticalAlignment = VerticalAlignment.Center;
+        _usbUnshareOnExitCheckBox.HorizontalAlignment = HorizontalAlignment.Left;
+        _usbUnshareOnExitCheckBox.IsChecked = _viewModel.UsbUnshareOnExit;
+        _usbUnshareOnExitCheckBox.Checked += (_, _) => _viewModel.UsbUnshareOnExit = true;
+        _usbUnshareOnExitCheckBox.Unchecked += (_, _) => _viewModel.UsbUnshareOnExit = false;
+        Grid.SetColumn(_usbUnshareOnExitCheckBox, 5);
+        actionRow.Children.Add(_usbUnshareOnExitCheckBox);
 
         _usbFeatureControlsPanel.Children.Add(_usbRuntimeHintText);
 
-        var remoteFxPolicySection = new StackPanel { Spacing = 6 };
-
-        var remoteFxPolicyHeaderRow = new Grid { ColumnSpacing = 10, VerticalAlignment = VerticalAlignment.Center };
-        remoteFxPolicyHeaderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        remoteFxPolicyHeaderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var remoteFxPolicyTitle = new TextBlock
-        {
-            Text = "RemoteFX USB-Redirection Richtlinie",
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        remoteFxPolicyHeaderRow.Children.Add(remoteFxPolicyTitle);
-
-        _usbRemoteFxPolicyStatusChip.Child = _usbRemoteFxPolicyStatusChipText;
-        _usbRemoteFxPolicyStatusChip.HorizontalAlignment = HorizontalAlignment.Right;
-        Grid.SetColumn(_usbRemoteFxPolicyStatusChip, 1);
-        remoteFxPolicyHeaderRow.Children.Add(_usbRemoteFxPolicyStatusChip);
-
-        remoteFxPolicySection.Children.Add(remoteFxPolicyHeaderRow);
-
-        var remoteFxPolicyActionRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
-        _usbRemoteFxPolicyEnabledCheckBox.Checked += async (_, _) => await OnUsbRemoteFxPolicyToggleChangedAsync(true);
-        _usbRemoteFxPolicyEnabledCheckBox.Unchecked += async (_, _) => await OnUsbRemoteFxPolicyToggleChangedAsync(false);
-        remoteFxPolicyActionRow.Children.Add(_usbRemoteFxPolicyEnabledCheckBox);
-
-        _usbRemoteFxPolicyRefreshButton = CreateIconButton("⟳", "Policy Refresh", onClick: async (_, _) => await RefreshUsbRemoteFxPolicyStatusAsync(showNotification: true));
-        remoteFxPolicyActionRow.Children.Add(_usbRemoteFxPolicyRefreshButton);
-
-        remoteFxPolicySection.Children.Add(remoteFxPolicyActionRow);
-        _usbFeatureControlsPanel.Children.Add(remoteFxPolicySection);
-
         _usbRemoteFxPolicyHintText.Foreground = Application.Current.Resources["TextMutedBrush"] as Brush;
+        _usbRemoteFxPolicyHintText.Text = "Hinweis: Für USB-Share muss 'RemoteFX USB Device Redirection' in den Richtlinien deaktiviert sein.";
+        _usbRemoteFxPolicyHintText.Visibility = Visibility.Visible;
         _usbFeatureControlsPanel.Children.Add(_usbRemoteFxPolicyHintText);
         actionsStack.Children.Add(_usbFeatureControlsPanel);
 
         UpdateUsbRuntimeStatusUi();
         UpdateHostFeatureAvailabilityUi();
-        _ = RefreshUsbRemoteFxPolicyStatusAsync(showNotification: false);
 
         actionsCard.Child = actionsStack;
         Grid.SetRow(actionsCard, 0);
@@ -2612,12 +2662,27 @@ public sealed class MainWindow : Window
         headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
+        var headerLeft = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 14,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        _sharedFolderHostFeatureEnabledToggleSwitch.Toggled += async (_, _) => await OnHostSharedFolderFeatureToggleChangedAsync(_sharedFolderHostFeatureEnabledToggleSwitch.IsOn);
+        _sharedFolderHostFeatureEnabledToggleSwitch.IsOn = _viewModel.HostSharedFoldersEnabled;
+        _sharedFolderHostFeatureEnabledToggleSwitch.MinWidth = 54;
+        _sharedFolderHostFeatureEnabledToggleSwitch.VerticalAlignment = VerticalAlignment.Center;
+        headerLeft.Children.Add(_sharedFolderHostFeatureEnabledToggleSwitch);
+
         var titleText = new TextBlock
         {
             Text = "Shared Folder (Netzlaufwerk im Guest-System per WinFsp)",
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center
         };
-        headerRow.Children.Add(titleText);
+        headerLeft.Children.Add(titleText);
+        headerRow.Children.Add(headerLeft);
 
         var statusStack = new StackPanel { Spacing = 4, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         _sharedFolderHostFeatureStatusChip.Child = _sharedFolderHostFeatureStatusChipText;
@@ -2627,11 +2692,6 @@ public sealed class MainWindow : Window
         headerRow.Children.Add(statusStack);
 
         editorStack.Children.Add(headerRow);
-
-        _sharedFolderHostFeatureEnabledCheckBox.Checked += async (_, _) => await OnHostSharedFolderFeatureToggleChangedAsync(true);
-        _sharedFolderHostFeatureEnabledCheckBox.Unchecked += async (_, _) => await OnHostSharedFolderFeatureToggleChangedAsync(false);
-        _sharedFolderHostFeatureEnabledCheckBox.Content = "Shared Folder aktiv";
-        _sharedFolderHostFeatureEnabledCheckBox.IsChecked = _viewModel.HostSharedFoldersEnabled;
 
         _sharedFolderPathTextBox.PlaceholderText = "Lokaler Ordnerpfad (z. B. C:\\VMShare\\Tools)";
         _sharedFolderShareNameTextBox.PlaceholderText = "Share-Kennung (z. B. HyperToolTools)";
@@ -2657,17 +2717,14 @@ public sealed class MainWindow : Window
         editorStack.Children.Add(fieldsRow);
 
         var actionRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        actionRow.Children.Add(_sharedFolderHostFeatureEnabledCheckBox);
         actionRow.Children.Add(_sharedFolderReadOnlyCheckBox);
         _sharedFolderNewButton = CreateIconButton("✚", "Neu", onClick: (_, _) => ResetSharedFolderEditor());
         _sharedFolderSaveButton = CreateIconButton("💾", "Speichern", onClick: async (_, _) => await SaveSharedFolderEntryAsync());
         _sharedFolderDeleteButton = CreateIconButton("🗑", "Entfernen", onClick: async (_, _) => await DeleteSharedFolderEntryAsync());
-        _sharedFolderSelfTestButton = CreateIconButton("🧪", "Self-Test", onClick: async (_, _) => await RunHostSharedFolderSelfTestAsync());
         _sharedFolderFileServiceInstallButton = CreateIconButton("⬇", "hypertool-file nachinstallieren", onClick: async (_, _) => await InstallHostFileServiceRuntimeAsync());
         actionRow.Children.Add(_sharedFolderNewButton);
         actionRow.Children.Add(_sharedFolderSaveButton);
         actionRow.Children.Add(_sharedFolderDeleteButton);
-        actionRow.Children.Add(_sharedFolderSelfTestButton);
         actionRow.Children.Add(_sharedFolderFileServiceInstallButton);
         editorStack.Children.Add(actionRow);
 
@@ -2862,6 +2919,7 @@ public sealed class MainWindow : Window
             Content = new TextBlock
             {
                 Text = text,
+                Margin = new Thickness(6, 0, 0, 0),
                 Foreground = Application.Current.Resources["TextPrimaryBrush"] as Brush,
                 FontWeight = Microsoft.UI.Text.FontWeights.Medium,
                 TextWrapping = TextWrapping.Wrap
@@ -3477,11 +3535,45 @@ public sealed class MainWindow : Window
 
         if (!hasOverflow)
         {
+            _vmChipLeftFadeOverlay.Visibility = Visibility.Collapsed;
+            _vmChipRightFadeOverlay.Visibility = Visibility.Collapsed;
             return;
         }
 
-        _vmChipsLeftButton.IsEnabled = _vmChipScrollViewer.HorizontalOffset > 1;
-        _vmChipsRightButton.IsEnabled = _vmChipScrollViewer.HorizontalOffset < (_vmChipScrollViewer.ScrollableWidth - 1);
+        var leftEnabled = _vmChipScrollViewer.HorizontalOffset > 1;
+        var rightEnabled = _vmChipScrollViewer.HorizontalOffset < (_vmChipScrollViewer.ScrollableWidth - 1);
+
+        _vmChipsLeftButton.IsEnabled = leftEnabled;
+        _vmChipsRightButton.IsEnabled = rightEnabled;
+
+        var fadeBase = IsDarkMode()
+            ? Windows.UI.Color.FromArgb(0xFF, 0x13, 0x1C, 0x2F)
+            : Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF6, 0xFB);
+
+        _vmChipLeftFadeOverlay.Background = new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0.5),
+            EndPoint = new Windows.Foundation.Point(1, 0.5),
+            GradientStops =
+            {
+                new GradientStop { Color = fadeBase, Offset = 0 },
+                new GradientStop { Color = Windows.UI.Color.FromArgb(0x00, fadeBase.R, fadeBase.G, fadeBase.B), Offset = 1 }
+            }
+        };
+
+        _vmChipRightFadeOverlay.Background = new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0.5),
+            EndPoint = new Windows.Foundation.Point(1, 0.5),
+            GradientStops =
+            {
+                new GradientStop { Color = Windows.UI.Color.FromArgb(0x00, fadeBase.R, fadeBase.G, fadeBase.B), Offset = 0 },
+                new GradientStop { Color = fadeBase, Offset = 1 }
+            }
+        };
+
+        _vmChipLeftFadeOverlay.Visibility = leftEnabled ? Visibility.Visible : Visibility.Collapsed;
+        _vmChipRightFadeOverlay.Visibility = rightEnabled ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void RefreshVmAdapterCards()
@@ -3586,12 +3678,52 @@ public sealed class MainWindow : Window
            && (runtimeState.Contains("off", StringComparison.OrdinalIgnoreCase)
                || runtimeState.Contains("aus", StringComparison.OrdinalIgnoreCase));
 
+    private void UpdateSelectedVmStateChip()
+    {
+        static SolidColorBrush Brush(byte a, byte r, byte g, byte b) => new(Color.FromArgb(a, r, g, b));
+
+        var state = _viewModel.SelectedVmState;
+        var isDark = IsDarkMode();
+
+        if (IsVmRunningState(state))
+        {
+            _selectedVmStateChip.Background = isDark
+                ? Brush(0xFF, 0x14, 0x3C, 0x2C)
+                : Brush(0xFF, 0xE8, 0xF8, 0xEF);
+            _selectedVmStateChip.BorderBrush = isDark
+                ? Brush(0xFF, 0x43, 0xB5, 0x81)
+                : Brush(0xFF, 0x2F, 0x9E, 0x68);
+            _selectedVmStateChipText.Foreground = isDark
+                ? Brush(0xFF, 0xD9, 0xF6, 0xE8)
+                : Brush(0xFF, 0x0E, 0x4F, 0x31);
+            return;
+        }
+
+        if (IsVmOffState(state))
+        {
+            _selectedVmStateChip.Background = isDark
+                ? Brush(0xFF, 0x42, 0x1F, 0x2A)
+                : Brush(0xFF, 0xFD, 0xEA, 0xEE);
+            _selectedVmStateChip.BorderBrush = isDark
+                ? Brush(0xFF, 0xC9, 0x5D, 0x79)
+                : Brush(0xFF, 0xC6, 0x48, 0x67);
+            _selectedVmStateChipText.Foreground = isDark
+                ? Brush(0xFF, 0xFF, 0xDC, 0xE5)
+                : Brush(0xFF, 0x77, 0x1D, 0x33);
+            return;
+        }
+
+        _selectedVmStateChip.Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush ?? Brush(0xFF, 0x20, 0x2A, 0x48);
+        _selectedVmStateChip.BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush ?? Brush(0xFF, 0x44, 0x57, 0x7F);
+        _selectedVmStateChipText.Foreground = Application.Current.Resources["TextMutedBrush"] as Brush ?? Brush(0xFF, 0xA6, 0xB9, 0xD8);
+    }
+
     private Button CreateVmChip(VmDefinition vm)
     {
         var chip = new Button
         {
             Padding = new Thickness(11, 8, 12, 8),
-            MinWidth = 240,
+            MinWidth = 0,
             HorizontalAlignment = HorizontalAlignment.Left,
             CornerRadius = new CornerRadius(12),
             BorderThickness = new Thickness(1),
@@ -3627,11 +3759,18 @@ public sealed class MainWindow : Window
             chip.BorderBrush = Application.Current.Resources["AccentBrush"] as Brush;
         }
 
-        var iconBadge = new Border
+        var iconBadge = new Grid
         {
-            Width = 28,
-            Height = 28,
-            CornerRadius = new CornerRadius(8),
+            Width = 31,
+            Height = 31,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        iconBadge.Children.Add(new Border
+        {
+            Width = 31,
+            Height = 31,
+            CornerRadius = new CornerRadius(9),
             VerticalAlignment = VerticalAlignment.Center,
             BorderThickness = new Thickness(1),
             BorderBrush = chip.BorderBrush,
@@ -3639,16 +3778,46 @@ public sealed class MainWindow : Window
             Child = new TextBlock
             {
                 Text = "🖥",
-                FontSize = 15,
+                FontSize = 17,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextAlignment = TextAlignment.Center
             }
-        };
+        });
+
+        var isDefaultVm = string.Equals(vm.Name, _viewModel.DefaultVmName, StringComparison.OrdinalIgnoreCase);
+
+        if (isDefaultVm)
+        {
+            var defaultBadge = new Border
+            {
+                Width = 13,
+                Height = 13,
+                CornerRadius = new CornerRadius(6.5),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0xF0, 0xC7, 0x56)),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0xB8, 0x82, 0x22)),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(0, 0, -3, -3),
+                Child = new TextBlock
+                {
+                    Text = "★",
+                    FontSize = 8.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x6F, 0x4A, 0x00)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextAlignment = TextAlignment.Center
+                }
+            };
+
+            iconBadge.Children.Add(defaultBadge);
+        }
 
         var text = new TextBlock
         {
-            Text = $"{vm.DisplayLabel}",
+            Text = vm.DisplayLabel,
             TextTrimming = TextTrimming.CharacterEllipsis,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             MaxWidth = 350
@@ -3685,6 +3854,9 @@ public sealed class MainWindow : Window
         flyout.Items.Add(CreateVmMenuItem("Stop", () => _viewModel.StopVmByNameCommand.ExecuteAsync(vm.Name)));
         flyout.Items.Add(CreateVmMenuItem("Hard Off", () => _viewModel.TurnOffVmByNameCommand.ExecuteAsync(vm.Name)));
         flyout.Items.Add(CreateVmMenuItem("Restart", () => _viewModel.RestartVmByNameCommand.ExecuteAsync(vm.Name)));
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        flyout.Items.Add(CreateVmMenuItem("Als Default-VM setzen", () => SetDefaultVmFromChipAsync(vm)));
+        flyout.Items.Add(CreateVmMenuItem("Schnellstart-Verknüpfung erstellen", () => CreateVmQuickstartForVmAsync(vm)));
         flyout.Items.Add(new MenuFlyoutSeparator());
         flyout.Items.Add(CreateVmMenuItem("Open Console", () => _viewModel.OpenConsoleByNameCommand.ExecuteAsync(vm.Name)));
         flyout.Items.Add(CreateVmMenuItem("Snapshot", () => _viewModel.CreateSnapshotByNameCommand.ExecuteAsync(vm.Name)));
@@ -3817,10 +3989,40 @@ public sealed class MainWindow : Window
         flyout.Items.Add(CreateVmMenuItem("Hard Off", () => _viewModel.TurnOffVmByNameCommand.ExecuteAsync(vm.Name)));
         flyout.Items.Add(CreateVmMenuItem("Restart", () => _viewModel.RestartVmByNameCommand.ExecuteAsync(vm.Name)));
         flyout.Items.Add(new MenuFlyoutSeparator());
+        flyout.Items.Add(CreateVmMenuItem("Als Default-VM setzen", () => SetDefaultVmFromChipAsync(vm)));
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        flyout.Items.Add(CreateVmMenuItem("Schnellstart-Verknüpfung erstellen", () => CreateVmQuickstartForVmAsync(vm)));
+        flyout.Items.Add(new MenuFlyoutSeparator());
         flyout.Items.Add(CreateVmMenuItem("Open Console", () => _viewModel.OpenConsoleByNameCommand.ExecuteAsync(vm.Name)));
         flyout.Items.Add(CreateVmMenuItem("Snapshot", () => _viewModel.CreateSnapshotByNameCommand.ExecuteAsync(vm.Name)));
         flyout.ShowAt(element);
         e.Handled = true;
+    }
+
+    private Task SetDefaultVmFromChipAsync(VmDefinition vm)
+    {
+        if (vm is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        _viewModel.SelectedVm = vm;
+        _viewModel.SelectedVmForConfig = vm;
+        _viewModel.SetDefaultVmCommand.Execute(null);
+        RequestVmChipsRefresh();
+        return Task.CompletedTask;
+    }
+
+    private async Task CreateVmQuickstartForVmAsync(VmDefinition vm)
+    {
+        if (vm is null)
+        {
+            return;
+        }
+
+        _viewModel.SelectedVm = vm;
+        _viewModel.SelectedVmForConfig = vm;
+        await CreateVmQuickstartShortcutAsync();
     }
 
     private static MenuFlyoutItem CreateVmMenuItem(string text, Func<Task> action)
@@ -3863,8 +4065,37 @@ public sealed class MainWindow : Window
         _hostNetworkWindow.Activate();
     }
 
+    public void CloseAuxiliaryWindows()
+    {
+        try
+        {
+            _helpWindow?.Close();
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _helpWindow = null;
+        }
+
+        try
+        {
+            _hostNetworkWindow?.Close();
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _hostNetworkWindow = null;
+        }
+    }
+
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        CloseAuxiliaryWindows();
+
         _vmChipRefreshDebounceTimer?.Stop();
         _vmChipRefreshDebounceTimer = null;
 
@@ -3924,17 +4155,14 @@ public sealed class MainWindow : Window
         {
             UpdatePageContent();
             UpdateNavSelection();
-
-            if (_viewModel.SelectedMenuIndex == 1)
-            {
-                _ = RefreshUsbRemoteFxPolicyStatusAsync(showNotification: false);
-            }
         }
 
         if (string.Equals(e.PropertyName, nameof(MainViewModel.SelectedVm), StringComparison.Ordinal)
             || string.Equals(e.PropertyName, nameof(MainViewModel.SelectedVmState), StringComparison.Ordinal)
             || string.Equals(e.PropertyName, nameof(MainViewModel.SelectedVmDisplayName), StringComparison.Ordinal))
         {
+            UpdateSelectedVmStateChip();
+
             if (_isMainLayoutLoaded)
             {
                 RequestVmChipsRefresh();
@@ -3945,6 +4173,8 @@ public sealed class MainWindow : Window
         if (string.Equals(e.PropertyName, nameof(MainViewModel.SelectedVmAdapterSwitchDisplay), StringComparison.Ordinal)
             || string.Equals(e.PropertyName, nameof(MainViewModel.UiTheme), StringComparison.Ordinal))
         {
+            UpdateSelectedVmStateChip();
+
             if (_isMainLayoutLoaded)
             {
                 RefreshVmAdapterCards();
@@ -3985,6 +4215,16 @@ public sealed class MainWindow : Window
             || string.Equals(e.PropertyName, nameof(MainViewModel.HostSharedFoldersEnabled), StringComparison.Ordinal))
         {
             UpdateHostFeatureAvailabilityUi();
+        }
+
+        if (string.Equals(e.PropertyName, nameof(MainViewModel.UsbAutoDetachOnClientDisconnect), StringComparison.Ordinal))
+        {
+            _usbAutoDetachOnDisconnectCheckBox.IsChecked = _viewModel.UsbAutoDetachOnClientDisconnect;
+        }
+
+        if (string.Equals(e.PropertyName, nameof(MainViewModel.UsbUnshareOnExit), StringComparison.Ordinal))
+        {
+            _usbUnshareOnExitCheckBox.IsChecked = _viewModel.UsbUnshareOnExit;
         }
 
         if (string.Equals(e.PropertyName, nameof(MainViewModel.SelectedUsbDeviceAutoShareEnabled), StringComparison.Ordinal))
@@ -4028,245 +4268,7 @@ public sealed class MainWindow : Window
 
         _usbRuntimeHintText.Visibility = (isFeatureEnabled && !isAvailable) ? Visibility.Visible : Visibility.Collapsed;
 
-        var policyIsKnown = _usbRemoteFxPolicyKnown;
-        var policyActive = _usbRemoteFxPolicyActive;
-        var policyChipPalette = ResolveRemoteFxPolicyChipPalette(policyIsKnown, policyActive);
-
-        _usbRemoteFxPolicyStatusChip.Background = policyChipPalette.chipBackground;
-        _usbRemoteFxPolicyStatusChip.BorderBrush = policyChipPalette.chipBorder;
-        _usbRemoteFxPolicyStatusChipText.Foreground = policyChipPalette.textForeground;
-        _usbRemoteFxPolicyStatusChipText.Text = !policyIsKnown
-            ? "Unbekannt"
-            : policyActive
-                ? "Aktiv"
-                : "Inaktiv";
-
-        _usbRemoteFxPolicyHintText.Text = !policyIsKnown
-            ? "Richtlinienstatus konnte nicht gelesen werden. Für USB-Share sollte RemoteFX USB Device Redirection nicht aktiviert sein."
-            : policyActive
-                ? "Warnung: Richtlinie ist aktiv. Das kann USB-Share stören. Nach Deaktivierung ist ein Host-Neustart erforderlich."
-                : string.Empty;
-
-        _suppressRemoteFxPolicyToggleEvents = true;
-        try
-        {
-            _usbRemoteFxPolicyEnabledCheckBox.IsChecked = policyIsKnown && policyActive;
-        }
-        finally
-        {
-            _suppressRemoteFxPolicyToggleEvents = false;
-        }
-
-        _usbRemoteFxPolicyEnabledCheckBox.IsEnabled = policyIsKnown;
-        _usbRemoteFxPolicyHintText.Visibility = (policyIsKnown && policyActive) || !policyIsKnown
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
-        if (_usbRemoteFxPolicyRefreshButton is not null)
-        {
-            _usbRemoteFxPolicyRefreshButton.IsEnabled = true;
-        }
-    }
-
-    private (Brush chipBackground, Brush chipBorder, Brush textForeground) ResolveRemoteFxPolicyChipPalette(bool isKnown, bool isActive)
-    {
-        static SolidColorBrush Brush(byte a, byte r, byte g, byte b) => new(Color.FromArgb(a, r, g, b));
-
-        if (!isKnown)
-        {
-            return (
-                Application.Current.Resources["SurfaceSoftBrush"] as Brush ?? Brush(0xFF, 0x20, 0x2A, 0x48),
-                Application.Current.Resources["PanelBorderBrush"] as Brush ?? Brush(0xFF, 0x44, 0x57, 0x7F),
-                Application.Current.Resources["TextMutedBrush"] as Brush ?? Brush(0xFF, 0xA6, 0xB9, 0xD8));
-        }
-
-        if (isActive)
-        {
-            if (IsDarkMode())
-            {
-                return (
-                    Brush(0xFF, 0x47, 0x31, 0x1B),
-                    Brush(0xFF, 0xF2, 0x9A, 0x3A),
-                    Brush(0xFF, 0xFF, 0xE9, 0xCC));
-            }
-
-            return (
-                Brush(0xFF, 0xFF, 0xF1, 0xDF),
-                Brush(0xFF, 0xD7, 0x82, 0x2C),
-                Brush(0xFF, 0x6B, 0x3A, 0x0A));
-        }
-
-        return ResolveFeatureChipPalette(isActive: true);
-    }
-
-    private async Task RefreshUsbRemoteFxPolicyStatusAsync(bool showNotification)
-    {
-        var (isKnown, isActive) = await Task.Run(ReadUsbRemoteFxPolicyStatus);
-        _usbRemoteFxPolicyKnown = isKnown;
-        _usbRemoteFxPolicyActive = isKnown && isActive;
-
-        if (_usbRemoteFxPolicyKnown && _usbRemoteFxPolicyActive && _viewModel.HostUsbSharingEnabled)
-        {
-            _viewModel.UsbStatusText = "Warnung: RemoteFX USB Device Redirection ist aktiv. Bitte Richtlinie deaktivieren und Host neu starten.";
-        }
-
-        if (showNotification)
-        {
-            if (!_usbRemoteFxPolicyKnown)
-            {
-                _viewModel.PublishNotification("RemoteFX-USB-Richtlinienstatus konnte nicht ermittelt werden.", "Warning");
-            }
-            else if (_usbRemoteFxPolicyActive)
-            {
-                _viewModel.PublishNotification("RemoteFX USB Device Redirection ist aktiv. Für USB-Share bitte deaktivieren und den Host neu starten.", "Warning");
-            }
-        }
-
-        UpdateUsbRuntimeStatusUi();
-    }
-
-    private static (bool isKnown, bool isActive) ReadUsbRemoteFxPolicyStatus()
-    {
-        try
-        {
-            var foundAnyPolicyValue = false;
-
-            if (HasEnabledUsbPolicyValue(RegistryView.Registry64, ref foundAnyPolicyValue)
-                || HasEnabledUsbPolicyValue(RegistryView.Registry32, ref foundAnyPolicyValue))
-            {
-                return (true, true);
-            }
-
-            return (true, false);
-        }
-        catch
-        {
-            return (false, false);
-        }
-    }
-
-    private static bool HasEnabledUsbPolicyValue(RegistryView view, ref bool foundAnyPolicyValue)
-    {
-        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
-
-        if (HasEnabledUsbPolicyValueInKey(baseKey, RemoteFxUsbPolicyClientPath, ref foundAnyPolicyValue))
-        {
-            return true;
-        }
-
-        return HasEnabledUsbPolicyValueInKey(baseKey, RemoteFxUsbPolicyLegacyPath, ref foundAnyPolicyValue);
-    }
-
-    private static bool HasEnabledUsbPolicyValueInKey(RegistryKey baseKey, string subKeyPath, ref bool foundAnyPolicyValue)
-    {
-        using var key = baseKey.OpenSubKey(subKeyPath, writable: false);
-        if (key is null)
-        {
-            return false;
-        }
-
-        foreach (var valueName in key.GetValueNames())
-        {
-            if (!valueName.StartsWith(RemoteFxUsbPolicyValuePrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            foundAnyPolicyValue = true;
-
-            var value = key.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
-            var numericValue = value switch
-            {
-                int intValue => intValue,
-                long longValue => (int)longValue,
-                _ => 0
-            };
-
-            if (numericValue > 0)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private async Task OnUsbRemoteFxPolicyToggleChangedAsync(bool enabled)
-    {
-        if (_suppressRemoteFxPolicyToggleEvents)
-        {
-            return;
-        }
-
-        await SetUsbRemoteFxPolicyEnabledViaPowerShellAsync(enabled);
-    }
-
-    private async Task SetUsbRemoteFxPolicyEnabledViaPowerShellAsync(bool enabled)
-    {
-        _usbRemoteFxPolicyEnabledCheckBox.IsEnabled = false;
-
-        if (_usbRemoteFxPolicyRefreshButton is not null)
-        {
-            _usbRemoteFxPolicyRefreshButton.IsEnabled = false;
-        }
-
-        try
-        {
-            var valueMain = enabled ? 1 : 0;
-            var valueNoAckIsoch = enabled ? 80 : 0;
-            var command =
-                "$ErrorActionPreference='Stop'; " +
-                "$p='HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services\\Client'; " +
-                "New-Item -Path $p -Force | Out-Null; " +
-                $"Set-ItemProperty -Path $p -Name fEnableUsbRedirection -Type DWord -Value {valueMain}; " +
-                $"Set-ItemProperty -Path $p -Name fEnableUsbBlockDeviceBySetupClass -Type DWord -Value {valueMain}; " +
-                $"Set-ItemProperty -Path $p -Name fEnableUsbSelectDeviceByInterface -Type DWord -Value {valueMain}; " +
-                $"Set-ItemProperty -Path $p -Name fEnableUsbNoAckIsochWriteToDevice -Type DWord -Value {valueNoAckIsoch};";
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"{command}\"",
-                UseShellExecute = true,
-                Verb = "runas",
-                WindowStyle = ProcessWindowStyle.Hidden
-            };
-
-            using var process = Process.Start(psi);
-            if (process is null)
-            {
-                throw new InvalidOperationException("PowerShell-Prozess konnte nicht gestartet werden.");
-            }
-
-            await process.WaitForExitAsync();
-            if (process.ExitCode != 0)
-            {
-                throw new InvalidOperationException($"PowerShell-ExitCode: {process.ExitCode}");
-            }
-
-            _viewModel.PublishNotification(enabled
-                    ? "RemoteFX USB Device Redirection wurde aktiviert. Host-Neustart erforderlich."
-                    : "RemoteFX USB Device Redirection wurde deaktiviert. Host-Neustart erforderlich.",
-                "Success");
-            await RefreshUsbRemoteFxPolicyStatusAsync(showNotification: false);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            _viewModel.PublishNotification("Richtlinie konnte nicht geändert werden. Bitte HyperTool als Administrator starten.", "Error");
-        }
-        catch (Exception ex)
-        {
-            _viewModel.PublishNotification($"Richtlinie konnte nicht geändert werden: {ex.Message}", "Error");
-        }
-        finally
-        {
-            _usbRemoteFxPolicyEnabledCheckBox.IsEnabled = _usbRemoteFxPolicyKnown;
-
-            if (_usbRemoteFxPolicyRefreshButton is not null)
-            {
-                _usbRemoteFxPolicyRefreshButton.IsEnabled = true;
-            }
-        }
+        _usbRemoteFxPolicyHintText.Visibility = Visibility.Visible;
     }
 
     private void UpdateHostFeatureAvailabilityUi()
@@ -4278,8 +4280,8 @@ public sealed class MainWindow : Window
         _suppressHostFeatureToggleEvents = true;
         try
         {
-            _usbHostFeatureEnabledCheckBox.IsChecked = usbEnabled;
-            _sharedFolderHostFeatureEnabledCheckBox.IsChecked = sharedFoldersEnabled;
+            _usbHostFeatureEnabledToggleSwitch.IsOn = usbEnabled;
+            _sharedFolderHostFeatureEnabledToggleSwitch.IsOn = sharedFoldersEnabled;
         }
         finally
         {
@@ -4308,7 +4310,10 @@ public sealed class MainWindow : Window
             _usbUnshareButton.IsEnabled = usbInteractive;
         }
 
-        _usbHostFeatureEnabledCheckBox.IsEnabled = usbRuntimeAvailable;
+        _usbAutoDetachOnDisconnectCheckBox.IsEnabled = usbInteractive;
+        _usbUnshareOnExitCheckBox.IsEnabled = usbInteractive;
+
+        _usbHostFeatureEnabledToggleSwitch.IsEnabled = usbRuntimeAvailable;
 
         _usbDisabledOverlayText.Visibility = usbInteractive ? Visibility.Collapsed : Visibility.Visible;
 
@@ -4351,11 +4356,6 @@ public sealed class MainWindow : Window
         if (_sharedFolderDeleteButton is not null)
         {
             _sharedFolderDeleteButton.IsEnabled = sharedFoldersInteractive;
-        }
-
-        if (_sharedFolderSelfTestButton is not null)
-        {
-            _sharedFolderSelfTestButton.IsEnabled = sharedFoldersInteractive;
         }
 
         if (_sharedFoldersListView is not null)
@@ -4615,6 +4615,78 @@ public sealed class MainWindow : Window
             {
                 await HideThemeTransitionOverlaySafeAsync();
             }
+        }
+    }
+
+    private async Task CreateVmQuickstartShortcutAsync()
+    {
+        var vm = _viewModel.SelectedVmForConfig ?? _viewModel.SelectedVm;
+        if (vm is null || string.IsNullOrWhiteSpace(vm.Name))
+        {
+            _viewModel.PublishNotification("Bitte zuerst eine VM auswählen.", "Info");
+            return;
+        }
+
+        var vmName = vm.Name.Trim();
+        var displayLabel = string.IsNullOrWhiteSpace(vm.DisplayLabel) ? vmName : vm.DisplayLabel.Trim();
+        var safeFileName = string.Join("_", displayLabel.Split(System.IO.Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim();
+        if (string.IsNullOrWhiteSpace(safeFileName))
+        {
+            safeFileName = "HyperTool-VM";
+        }
+
+        var desktopDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var shortcutPath = System.IO.Path.Combine(desktopDirectory, $"HyperTool Start {safeFileName}.lnk");
+
+        var ps =
+            "$ErrorActionPreference='Stop'; " +
+            "$shell=New-Object -ComObject WScript.Shell; " +
+            $"$lnk=$shell.CreateShortcut('{shortcutPath.Replace("'", "''")}'); " +
+            "$lnk.TargetPath='powershell.exe'; " +
+            $"$lnk.Arguments='-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"Start-VM -Name ''' + '{vmName.Replace("'", "''")}' + ''' -Confirm:$false\"'; " +
+            "$lnk.WorkingDirectory=$env:SystemRoot; " +
+            "$lnk.IconLocation=$env:SystemRoot + '\\\\System32\\\\shell32.dll,25'; " +
+            $"$lnk.Description='HyperTool Schnellstart fuer VM {displayLabel.Replace("'", "''")}'; " +
+            "$lnk.Save();";
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        psi.ArgumentList.Add("-NoProfile");
+        psi.ArgumentList.Add("-NonInteractive");
+        psi.ArgumentList.Add("-ExecutionPolicy");
+        psi.ArgumentList.Add("Bypass");
+        psi.ArgumentList.Add("-Command");
+        psi.ArgumentList.Add(ps);
+
+        try
+        {
+            using var process = Process.Start(psi);
+            if (process is null)
+            {
+                throw new InvalidOperationException("PowerShell konnte nicht gestartet werden.");
+            }
+
+            var stdErr = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(stdErr)
+                    ? $"ExitCode {process.ExitCode}"
+                    : stdErr.Trim());
+            }
+
+            _viewModel.PublishNotification($"Schnellstart-Verknuepfung erstellt: {shortcutPath}", "Success");
+        }
+        catch (Exception ex)
+        {
+            _viewModel.PublishNotification($"Schnellstart-Verknuepfung konnte nicht erstellt werden: {ex.Message}", "Error");
         }
     }
 

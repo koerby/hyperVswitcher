@@ -293,6 +293,8 @@ public sealed partial class App : Application
                 _mainWindow.Activate();
             }
 
+            _ = RefreshHostUsbDevicesSafeAsync();
+
             Log.Information("Config loaded from {ConfigPath}", configResult.ConfigPath);
             Log.Information("HyperTool started (WinUI 3).");
         }
@@ -834,6 +836,7 @@ public sealed partial class App : Application
         {
             try
             {
+                mainWindow.CloseAuxiliaryWindows();
                 mainWindow.Close();
             }
             catch
@@ -855,6 +858,12 @@ public sealed partial class App : Application
 
         if (_mainViewModel is null)
         {
+            return;
+        }
+
+        if (!_mainViewModel.UsbUnshareOnExit)
+        {
+            Log.Information("USB cleanup on shutdown skipped by setting (UsbUnshareOnExit=false).");
             return;
         }
 

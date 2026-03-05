@@ -196,6 +196,7 @@ public sealed partial class App : Application
             ConnectUsbAsync,
             DisconnectUsbAsync,
             SaveConfigAsync,
+            ReloadConfigSnapshotAsync,
             RestartForThemeChangeAsync,
             ExitForUpdateInstallAsync,
             RunTransportDiagnosticsTestAsync,
@@ -249,6 +250,7 @@ public sealed partial class App : Application
             }
         }
 
+        _ = EnsureStartupUsbListInitializedAsync();
         _ = RunDeferredStartupTasksAsync();
 
         if (_pendingSingleInstanceShow)
@@ -281,6 +283,13 @@ public sealed partial class App : Application
         await Task.CompletedTask;
     }
 
+    private Task<GuestConfig> ReloadConfigSnapshotAsync()
+    {
+        _config = GuestConfigService.LoadOrCreate(_configPath, out _);
+        _currentUsbTransportUseHyperVSocket = _config.Usb?.UseHyperVSocket != false;
+        return Task.FromResult(_config);
+    }
+
     private async Task RunDeferredStartupTasksAsync()
     {
         try
@@ -295,14 +304,7 @@ public sealed partial class App : Application
         {
         }
 
-        try
-        {
-            await RefreshUsbDevicesAsync();
-        }
-        catch (Exception ex)
-        {
-            GuestLogger.Warn("startup.usb_refresh_failed", ex.Message);
-        }
+        await EnsureStartupUsbListInitializedAsync();
 
         try
         {
@@ -314,6 +316,23 @@ public sealed partial class App : Application
         catch (Exception ex)
         {
             GuestLogger.Warn("startup.updatecheck_failed", ex.Message);
+        }
+    }
+
+    private async Task EnsureStartupUsbListInitializedAsync()
+    {
+        if (_config?.Usb?.Enabled == false || _usbDevices.Count > 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await RefreshUsbDevicesAsync(emitLogs: false);
+        }
+        catch (Exception ex)
+        {
+            GuestLogger.Warn("startup.usb_refresh_failed", ex.Message);
         }
     }
 
@@ -420,6 +439,7 @@ public sealed partial class App : Application
             {
             }
 
+            _mainWindow?.CloseAuxiliaryWindows();
             _mainWindow?.Close();
             Exit();
         }
@@ -503,6 +523,7 @@ public sealed partial class App : Application
                 ConnectUsbAsync,
                 DisconnectUsbAsync,
                 SaveConfigAsync,
+                ReloadConfigSnapshotAsync,
                 RestartForThemeChangeAsync,
                 ExitForUpdateInstallAsync,
                 RunTransportDiagnosticsTestAsync,
@@ -1816,6 +1837,12 @@ public sealed partial class App : Application
 
     private async Task DisconnectAllAttachedUsbOnExitAsync()
     {
+        if (_config?.Usb?.DisconnectOnExit == false)
+        {
+            GuestLogger.Info("usb.exit_disconnect.skipped", "USB-Disconnect beim Beenden per Einstellung deaktiviert.");
+            return;
+        }
+
         try
         {
             await RefreshUsbDevicesAsync();

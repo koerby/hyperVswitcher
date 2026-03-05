@@ -70,6 +70,10 @@ public sealed class UsbSettings
 {
     public bool Enabled { get; set; } = true;
 
+    public bool AutoDetachOnClientDisconnect { get; set; } = true;
+
+    public bool UnshareOnExit { get; set; } = true;
+
     public List<string> AutoShareDeviceKeys { get; set; } = [];
 }
 
