@@ -4,12 +4,17 @@ HyperTool ist ein WinUI-3 Toolset für Hyper-V-Host und Windows-Guest mit Fokus 
 
 ## Aktueller Release-Stand
 
-- Version: **v2.3.5**
+- Version: **v2.3.7**
 - Shared Folder ist end-to-end integriert: Host-Katalog/Freigaben + Guest-Mounting über `hypertool-file`.
 - Guest nutzt `WinFsp` als zusätzliche Runtime für Shared-Folder-Mounts inkl. Runtime-Status, Installationshinweis und Quellenangabe.
 - Host und Guest enthalten konsistente Runtime-Statusanzeigen (USB/Shared Folder) mit Installations- und Neustart-Aktionen.
 - `Tool neu starten` ist in Host/Guest (USB/Shared Folder/Config) vereinheitlicht und zeigt wie beim Theme-Wechsel kurz den Reload-Screen.
 - Guest-Info führt externe Quellen (`usbip-win2`, `winfsp`) nebeneinander mit symmetrischem Kartenlayout.
+- Host VM-Chips wurden visuell nachgeschliffen (kompaktere Breite, klarere Default-Markierung, größere/lesbarere Icon-Badges).
+- Default-VM und Schnellstart-Verknüpfung sind als direkte VM-Kontextaktionen verfügbar (Chip-/VM-Menü).
+- Header-Status wurde präzisiert: `Selected VM` zeigt den VM-State farbig und theme-sensitiv (Running/Off + Dark/Light).
+- Guest-Header verhält sich stabiler: VM-Chips sind konsistent unter dem Titel angeordnet und vermeiden Resize-Jitter.
+- Ungespeicherte Konfigurationsänderungen verhalten sich in Host und Guest konsistent beim Navigieren/Neu-Laden.
 
 ## Projekte
 
@@ -92,17 +97,17 @@ Hinweise:
 ### Host
 
 - build-host.bat
-- build-installer-host.bat version=2.3.5
+- build-installer-host.bat version=2.3.7
 
 ### Guest
 
 - build-guest.bat
-- build-installer-guest.bat version=2.3.5
+- build-installer-guest.bat version=2.3.7
 
 ### Komplett
 
 - build-all.bat
-- build-all.bat version=2.3.5 host guest host-installer guest-installer no-pause
+- build-all.bat version=2.3.7 host guest host-installer guest-installer no-pause
 
 Ausgaben:
 

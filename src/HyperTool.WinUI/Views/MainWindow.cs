@@ -79,8 +79,7 @@ public sealed class MainWindow : Window
     private readonly ListView _sharedFoldersListView = new();
     private readonly Ellipse _sharedFolderFileServiceStatusDot = new() { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _sharedFolderFileServiceStatusText = new() { Opacity = 0.9, VerticalAlignment = VerticalAlignment.Center };
-    private readonly Border _selectedVmStateChip = new() { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(10, 3, 10, 3), VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBlock _selectedVmStateChipText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _selectedVmStateText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBox _sharedFolderPathTextBox = new();
     private readonly TextBox _sharedFolderShareNameTextBox = new();
     private readonly CheckBox _sharedFolderReadOnlyCheckBox = new() { Content = "Freigabe nur Lesen" };
@@ -1561,10 +1560,9 @@ public sealed class MainWindow : Window
         var stateLabel = new TextBlock { Text = "State", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
         Grid.SetColumn(stateLabel, 2);
         selectedVmGrid.Children.Add(stateLabel);
-        _selectedVmStateChipText.SetBinding(TextBlock.TextProperty, new Binding { Source = _viewModel, Path = new PropertyPath(nameof(MainViewModel.SelectedVmState)) });
-        _selectedVmStateChip.Child = _selectedVmStateChipText;
-        Grid.SetColumn(_selectedVmStateChip, 3);
-        selectedVmGrid.Children.Add(_selectedVmStateChip);
+        _selectedVmStateText.SetBinding(TextBlock.TextProperty, new Binding { Source = _viewModel, Path = new PropertyPath(nameof(MainViewModel.SelectedVmState)) });
+        Grid.SetColumn(_selectedVmStateText, 3);
+        selectedVmGrid.Children.Add(_selectedVmStateText);
         var networkLabel = new TextBlock { Text = "Network", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
         Grid.SetColumn(networkLabel, 4);
         selectedVmGrid.Children.Add(networkLabel);
@@ -1577,7 +1575,7 @@ public sealed class MainWindow : Window
 
         _vmPage = BuildVmPage();
         _infoPage = BuildInfoPage();
-        UpdateSelectedVmStateChip();
+        UpdateSelectedVmStateTextStyle();
         UpdatePageContent();
         Grid.SetRow(_pageContent, 2);
         contentGrid.Children.Add(_pageContent);
@@ -3678,7 +3676,7 @@ public sealed class MainWindow : Window
            && (runtimeState.Contains("off", StringComparison.OrdinalIgnoreCase)
                || runtimeState.Contains("aus", StringComparison.OrdinalIgnoreCase));
 
-    private void UpdateSelectedVmStateChip()
+    private void UpdateSelectedVmStateTextStyle()
     {
         static SolidColorBrush Brush(byte a, byte r, byte g, byte b) => new(Color.FromArgb(a, r, g, b));
 
@@ -3687,13 +3685,7 @@ public sealed class MainWindow : Window
 
         if (IsVmRunningState(state))
         {
-            _selectedVmStateChip.Background = isDark
-                ? Brush(0xFF, 0x14, 0x3C, 0x2C)
-                : Brush(0xFF, 0xE8, 0xF8, 0xEF);
-            _selectedVmStateChip.BorderBrush = isDark
-                ? Brush(0xFF, 0x43, 0xB5, 0x81)
-                : Brush(0xFF, 0x2F, 0x9E, 0x68);
-            _selectedVmStateChipText.Foreground = isDark
+            _selectedVmStateText.Foreground = isDark
                 ? Brush(0xFF, 0xD9, 0xF6, 0xE8)
                 : Brush(0xFF, 0x0E, 0x4F, 0x31);
             return;
@@ -3701,21 +3693,13 @@ public sealed class MainWindow : Window
 
         if (IsVmOffState(state))
         {
-            _selectedVmStateChip.Background = isDark
-                ? Brush(0xFF, 0x42, 0x1F, 0x2A)
-                : Brush(0xFF, 0xFD, 0xEA, 0xEE);
-            _selectedVmStateChip.BorderBrush = isDark
-                ? Brush(0xFF, 0xC9, 0x5D, 0x79)
-                : Brush(0xFF, 0xC6, 0x48, 0x67);
-            _selectedVmStateChipText.Foreground = isDark
+            _selectedVmStateText.Foreground = isDark
                 ? Brush(0xFF, 0xFF, 0xDC, 0xE5)
                 : Brush(0xFF, 0x77, 0x1D, 0x33);
             return;
         }
 
-        _selectedVmStateChip.Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush ?? Brush(0xFF, 0x20, 0x2A, 0x48);
-        _selectedVmStateChip.BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush ?? Brush(0xFF, 0x44, 0x57, 0x7F);
-        _selectedVmStateChipText.Foreground = Application.Current.Resources["TextMutedBrush"] as Brush ?? Brush(0xFF, 0xA6, 0xB9, 0xD8);
+        _selectedVmStateText.Foreground = Application.Current.Resources["TextMutedBrush"] as Brush ?? Brush(0xFF, 0xA6, 0xB9, 0xD8);
     }
 
     private Button CreateVmChip(VmDefinition vm)
@@ -4161,7 +4145,7 @@ public sealed class MainWindow : Window
             || string.Equals(e.PropertyName, nameof(MainViewModel.SelectedVmState), StringComparison.Ordinal)
             || string.Equals(e.PropertyName, nameof(MainViewModel.SelectedVmDisplayName), StringComparison.Ordinal))
         {
-            UpdateSelectedVmStateChip();
+            UpdateSelectedVmStateTextStyle();
 
             if (_isMainLayoutLoaded)
             {
@@ -4173,7 +4157,7 @@ public sealed class MainWindow : Window
         if (string.Equals(e.PropertyName, nameof(MainViewModel.SelectedVmAdapterSwitchDisplay), StringComparison.Ordinal)
             || string.Equals(e.PropertyName, nameof(MainViewModel.UiTheme), StringComparison.Ordinal))
         {
-            UpdateSelectedVmStateChip();
+            UpdateSelectedVmStateTextStyle();
 
             if (_isMainLayoutLoaded)
             {

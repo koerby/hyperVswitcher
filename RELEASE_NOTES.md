@@ -1,5 +1,49 @@
 # HyperTool Release Notes
 
+## v2.3.7
+
+### Highlights
+
+- Host- und Guest-Oberflächen wurden für den täglichen VM-Workflow sichtbar entschlackt und stärker vereinheitlicht.
+- VM-Chips, Header-Status und Kontextaktionen sind im Host präziser und schneller bedienbar.
+- Ungespeicherte Konfigurationsänderungen reagieren in Host und Guest konsistent beim Wechseln/Neu-Laden.
+
+### Neu
+
+- Host VM-Kontextaktionen:
+	- `Als Default-VM setzen` direkt über VM-Chip-/VM-Menü verfügbar.
+	- `Schnellstart-Verknüpfung erstellen` direkt über VM-Chip-/VM-Menü verfügbar.
+- Guest USB:
+	- Option zum automatischen USB-Disconnect beim Beenden ergänzt.
+	- USB-Refresh beim Guest-Start verbessert, damit Device-Status früher konsistent ist.
+- Header-Status (Host):
+	- `Selected VM` zeigt den aktuellen State als farbigen Status-Chip (Running grün, Off rot), theme-sensitiv für Dark/Light.
+
+### Verbessert
+
+- Host VM-Chips:
+	- Chip-Breiten verhalten sich stärker inhaltsbasiert (kurze VM-Namen wirken nicht mehr unnötig breit).
+	- PC-Icon und Default-Stern wurden visuell vergrößert und entquetscht, ohne die Chip-Größe aufzublähen.
+	- Default-Markierung als Badge/Overlay optisch präzisiert.
+- Guest Header:
+	- VM-Chips stabil unter dem Titel platziert, um Resize-Jitter und inkonsistente Rückwechsel zu vermeiden.
+- Layout/UX (Host/Guest):
+	- System-/Update-Bereiche und Abstände in mehreren Ansichten nachgeschliffen.
+	- Checkbox-/Header-Abstände konsistenter für bessere Lesbarkeit.
+
+### Behoben
+
+- Host:
+	- Potenzieller UI-Freeze beim Verwerfen (`Nein`) ungespeicherter Änderungen adressiert.
+	- Reload-Pfad nach `Nein` auf konsistentes Snapshot-Reload umgestellt.
+- Guest:
+	- `Nein`-/Reload-Verhalten beim Verwerfen ungespeicherter Änderungen robuster gemacht.
+	- Menüwechsel-Prompt ergänzt, damit Änderungen nicht still verworfen werden.
+
+### Doku
+
+- README auf `v2.3.7` aktualisiert (Release-Stand, Feature-Hinweise, Build-Beispiele).
+
 ## v2.3.5
 
 ### Highlights
