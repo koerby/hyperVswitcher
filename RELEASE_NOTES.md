@@ -13,11 +13,16 @@
 - Host VM-Kontextaktionen:
 	- `Als Default-VM setzen` direkt über VM-Chip-/VM-Menü verfügbar.
 	- `Schnellstart-Verknüpfung erstellen` direkt über VM-Chip-/VM-Menü verfügbar.
+- Info-Menü (Host/Guest):
+	- Neuer gelber `Buy Me a Coffee`-Button mit Kaffee-Icon und Direktlink: `https://buymeacoffee.com/koerby`.
 - Guest USB:
 	- Option zum automatischen USB-Disconnect beim Beenden ergänzt.
 	- USB-Refresh beim Guest-Start verbessert, damit Device-Status früher konsistent ist.
 - Header-Status (Host):
 	- `Selected VM` zeigt den aktuellen State als farbigen Status-Chip (Running grün, Off rot), theme-sensitiv für Dark/Light.
+- Host/Guest Easteregg:
+	- Ein neues, verstecktes Easteregg wurde eingebaut - ohne Spoiler, nur so viel: Es lohnt sich, die UI aufmerksam zu erkunden.
+
 
 ### Verbessert
 
@@ -30,6 +35,8 @@
 - Layout/UX (Host/Guest):
 	- System-/Update-Bereiche und Abstände in mehreren Ansichten nachgeschliffen.
 	- Checkbox-/Header-Abstände konsistenter für bessere Lesbarkeit.
+	- Optionale Runtime-Aufgaben im Installer sichtbarer gemacht, damit notwendige Komponenten    	schneller erkennbar sind.
+
 
 ### Behoben
 
@@ -39,6 +46,7 @@
 - Guest:
 	- `Nein`-/Reload-Verhalten beim Verwerfen ungespeicherter Änderungen robuster gemacht.
 	- Menüwechsel-Prompt ergänzt, damit Änderungen nicht still verworfen werden.
+	- USB/IP-Client-Erkennung robuster gemacht, damit "Nicht installiert"-/"Verfügbar"-Status nach Installation/Deinstallation konsistent ist.
 
 ### Doku
 

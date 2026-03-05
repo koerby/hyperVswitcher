@@ -67,10 +67,7 @@ public sealed partial class App : Application
     private RotateTransform? _trollSceneRotate;
     private readonly List<TrollActorState> _trollOverlayActors = [];
 
-    private static readonly bool UseLegacyTrollGlyphs = !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
-    private static readonly string[] TrollSprites = UseLegacyTrollGlyphs
-        ? ["TROLL", "AXE", "BOOM", "FIRE", "CRASH", "VOID"]
-        : ["🧌", "🪓", "💥", "🔥", "⚒", "🕳"];
+    private static readonly string[] TrollSprites = ["🧌", "🪓", "💥", "🔥", "⚒", "🕳"];
 
     private sealed class TrollActorState
     {
@@ -317,8 +314,6 @@ public sealed partial class App : Application
                 var seconds = (DateTimeOffset.UtcNow - startedAtUtc).TotalSeconds;
                 ApplyTrollPalette(seconds);
                 UpdateTrollOverlayScene(seconds);
-                ApplyTrollSceneWarp(seconds);
-                ApplyTrollShake(seconds, basePosition);
 
                 await Task.Delay(80, cts.Token);
             }
@@ -333,8 +328,16 @@ public sealed partial class App : Application
             if (ReferenceEquals(_trollModeCts, cts))
             {
                 _trollModeCts = null;
+
+                try
+                {
+                    await FadeOutTrollOverlayForRestartAsync();
+                }
+                catch
+                {
+                }
+
                 HideTrollOverlay();
-                ResetTrollSceneWarp();
                 RestoreMainWindowPosition(basePosition);
 
                 var reloaded = false;
@@ -460,28 +463,16 @@ public sealed partial class App : Application
         }
 
         Grid hostGrid;
-        var sceneContainer = new Grid();
         if (currentContent is Grid existingGrid)
         {
             hostGrid = existingGrid;
-
-            var existingChildren = existingGrid.Children.ToList();
-            existingGrid.Children.Clear();
-            foreach (var child in existingChildren)
-            {
-                sceneContainer.Children.Add(child);
-            }
-
-            existingGrid.Children.Add(sceneContainer);
-            _trollSceneTarget = sceneContainer;
         }
         else
         {
             hostGrid = new Grid();
             _mainWindow.Content = hostGrid;
-            sceneContainer.Children.Add(currentContent);
-            hostGrid.Children.Add(sceneContainer);
-            _trollSceneTarget = sceneContainer;
+            hostGrid.Children.Add(currentContent);
+            _trollSceneTarget = currentContent;
         }
 
         _trollOverlayHost = hostGrid;
@@ -516,7 +507,7 @@ public sealed partial class App : Application
 
         _trollOverlayBoss = new TextBlock
         {
-            Text = UseLegacyTrollGlyphs ? "TROLL" : "🧌",
+            Text = "🧌",
             FontSize = 230,
             Opacity = 0,
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -558,11 +549,31 @@ public sealed partial class App : Application
         Canvas.SetZIndex(_trollOverlayBoss, 7003);
         Canvas.SetZIndex(_trollOverlayStatus, 7004);
 
+        ConfigureTrollOverlayPlacement(hostGrid, _trollOverlayDimmer);
+        ConfigureTrollOverlayPlacement(hostGrid, _trollOverlayCrater);
+        ConfigureTrollOverlayPlacement(hostGrid, _trollOverlayCanvas);
+        ConfigureTrollOverlayPlacement(hostGrid, _trollOverlayBoss);
+        ConfigureTrollOverlayPlacement(hostGrid, _trollOverlayStatus);
+
         hostGrid.Children.Add(_trollOverlayDimmer);
         hostGrid.Children.Add(_trollOverlayCrater);
         hostGrid.Children.Add(_trollOverlayCanvas);
         hostGrid.Children.Add(_trollOverlayBoss);
         hostGrid.Children.Add(_trollOverlayStatus);
+    }
+
+    private static void ConfigureTrollOverlayPlacement(Grid hostGrid, FrameworkElement element)
+    {
+        var rowCount = Math.Max(1, hostGrid.RowDefinitions.Count);
+        var columnCount = Math.Max(1, hostGrid.ColumnDefinitions.Count);
+
+        var startRow = rowCount > 1 ? 1 : 0;
+        var rowSpan = rowCount - startRow;
+
+        Grid.SetRow(element, startRow);
+        Grid.SetRowSpan(element, Math.Max(1, rowSpan));
+        Grid.SetColumn(element, 0);
+        Grid.SetColumnSpan(element, columnCount);
     }
 
     private void ResetTrollOverlayScene()
@@ -672,9 +683,7 @@ public sealed partial class App : Application
             {
                 var pulse = (Math.Sin(seconds * 20d) + 1d) / 2d;
                 _trollOverlayBoss.Opacity = 0.52 + pulse * 0.46;
-                _trollOverlayBoss.Text = pulse > 0.62
-                    ? (UseLegacyTrollGlyphs ? "TROLL" : "🧌")
-                    : (UseLegacyTrollGlyphs ? "BOOM" : "💥");
+                _trollOverlayBoss.Text = pulse > 0.62 ? "🧌" : "💥";
                 if (_trollOverlayBoss.RenderTransform is ScaleTransform scale)
                 {
                     scale.ScaleX = 1.12 + pulse * 0.82;
@@ -726,14 +735,12 @@ public sealed partial class App : Application
             actor.Y += actor.VY * velocityBoost;
             actor.Angle += actor.Spin;
 
-            if (string.Equals(actor.Glyph, "🔥", StringComparison.Ordinal) || string.Equals(actor.Glyph, "FIRE", StringComparison.Ordinal))
+            if (string.Equals(actor.Glyph, "🔥", StringComparison.Ordinal))
             {
                 actor.Y -= (seconds >= 20d ? 0.9d : 0.35d);
             }
 
-            if ((string.Equals(actor.Glyph, "💥", StringComparison.Ordinal)
-                || string.Equals(actor.Glyph, "BOOM", StringComparison.Ordinal)
-                || string.Equals(actor.Glyph, "CRASH", StringComparison.Ordinal))
+            if (string.Equals(actor.Glyph, "💥", StringComparison.Ordinal)
                 && seconds >= 18d)
             {
                 actor.Angle += actor.Spin * 0.8d;
@@ -780,9 +787,6 @@ public sealed partial class App : Application
             "🧌" => _trollRandom.Next(64, 110),
             "🔥" => _trollRandom.Next(52, 94),
             "💥" => _trollRandom.Next(58, 102),
-            "TROLL" => _trollRandom.Next(68, 108),
-            "FIRE" => _trollRandom.Next(62, 96),
-            "BOOM" => _trollRandom.Next(64, 100),
             _ => _trollRandom.Next(42, 86)
         };
 
@@ -816,6 +820,34 @@ public sealed partial class App : Application
 
     private void HideTrollOverlay()
     {
+        if (_trollOverlayHost is not null)
+        {
+            if (_trollOverlayDimmer is not null)
+            {
+                _trollOverlayHost.Children.Remove(_trollOverlayDimmer);
+            }
+
+            if (_trollOverlayCrater is not null)
+            {
+                _trollOverlayHost.Children.Remove(_trollOverlayCrater);
+            }
+
+            if (_trollOverlayCanvas is not null)
+            {
+                _trollOverlayHost.Children.Remove(_trollOverlayCanvas);
+            }
+
+            if (_trollOverlayBoss is not null)
+            {
+                _trollOverlayHost.Children.Remove(_trollOverlayBoss);
+            }
+
+            if (_trollOverlayStatus is not null)
+            {
+                _trollOverlayHost.Children.Remove(_trollOverlayStatus);
+            }
+        }
+
         if (_trollOverlayCanvas is not null)
         {
             _trollOverlayCanvas.Children.Clear();
@@ -844,34 +876,21 @@ public sealed partial class App : Application
             _trollOverlayStatus.Opacity = 0;
             _trollOverlayStatus.Text = string.Empty;
         }
+
+        _trollOverlayHost = null;
+        _trollOverlayDimmer = null;
+        _trollOverlayCrater = null;
+        _trollOverlayCanvas = null;
+        _trollOverlayBoss = null;
+        _trollOverlayStatus = null;
+        _trollSceneTarget = null;
+        _trollSceneTranslate = null;
+        _trollSceneRotate = null;
     }
 
     private void ApplyTrollSceneWarp(double seconds)
     {
-        if (_trollSceneTranslate is null || _trollSceneRotate is null)
-        {
-            return;
-        }
-
-        var shiftStrength = seconds switch
-        {
-            < 8d => 0,
-            < 20d => 4,
-            < 25d => 10,
-            _ => 3
-        };
-
-        var tiltStrength = seconds switch
-        {
-            < 8d => 0d,
-            < 20d => 0.6d,
-            < 25d => 1.7d,
-            _ => 0.4d
-        };
-
-        _trollSceneTranslate.X = _trollRandom.Next(-shiftStrength, shiftStrength + 1);
-        _trollSceneTranslate.Y = _trollRandom.Next(-shiftStrength, shiftStrength + 1);
-        _trollSceneRotate.Angle = Math.Sin(seconds * 8d) * tiltStrength;
+        ResetTrollSceneWarp();
     }
 
     private void ResetTrollSceneWarp()
@@ -903,7 +922,7 @@ public sealed partial class App : Application
 
         if (_trollOverlayBoss is not null)
         {
-            _trollOverlayBoss.Text = UseLegacyTrollGlyphs ? "OK" : "✅";
+            _trollOverlayBoss.Text = "✅";
             _trollOverlayBoss.Opacity = 0.78;
             if (_trollOverlayBoss.RenderTransform is ScaleTransform scale)
             {
@@ -936,35 +955,48 @@ public sealed partial class App : Application
         }
     }
 
+    private async Task FadeOutTrollOverlayForRestartAsync()
+    {
+        if (_trollOverlayDimmer is null)
+        {
+            return;
+        }
+
+        if (_trollOverlayDimmer.Background is SolidColorBrush dimBrush)
+        {
+            dimBrush.Color = Color.FromArgb(0xFF, 0x03, 0x03, 0x04);
+        }
+
+        var initialDim = _trollOverlayDimmer.Opacity;
+        for (var step = 0; step < 7; step++)
+        {
+            var t = (step + 1) / 7d;
+            _trollOverlayDimmer.Opacity = Math.Clamp(initialDim + (0.9d - initialDim) * t, 0d, 0.92d);
+
+            if (_trollOverlayCanvas is not null)
+            {
+                _trollOverlayCanvas.Opacity = Math.Max(0d, _trollOverlayCanvas.Opacity * (1d - 0.2d));
+            }
+
+            if (_trollOverlayBoss is not null)
+            {
+                _trollOverlayBoss.Opacity = Math.Max(0d, _trollOverlayBoss.Opacity * (1d - 0.24d));
+            }
+
+            if (_trollOverlayStatus is not null)
+            {
+                _trollOverlayStatus.Opacity = Math.Max(0d, _trollOverlayStatus.Opacity * (1d - 0.24d));
+            }
+
+            await Task.Delay(24);
+        }
+
+        await Task.Delay(80);
+    }
+
     private void ApplyTrollShake(double seconds, PointInt32? basePosition)
     {
-        if (basePosition is null || _mainWindow?.AppWindow is not AppWindow appWindow)
-        {
-            return;
-        }
-
-        var amplitude = seconds switch
-        {
-            < 8d => 0,
-            < 20d => 3,
-            < 25d => 8,
-            _ => 2
-        };
-
-        if (amplitude <= 0)
-        {
-            return;
-        }
-
-        try
-        {
-            var dx = _trollRandom.Next(-amplitude, amplitude + 1);
-            var dy = _trollRandom.Next(-amplitude, amplitude + 1);
-            appWindow.Move(new PointInt32(basePosition.Value.X + dx, basePosition.Value.Y + dy));
-        }
-        catch
-        {
-        }
+        RestoreMainWindowPosition(basePosition);
     }
 
     private void RestoreMainWindowPosition(PointInt32? basePosition)

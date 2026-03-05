@@ -3296,6 +3296,14 @@ internal sealed class GuestMainWindow : Window
         _installUpdateButton.IsEnabled = CanInstallUpdate();
         buttonRow.Children.Add(_installUpdateButton);
         buttonRow.Children.Add(CreateIconButton("🌐", "Changelog / Release", onClick: (_, _) => OpenReleasePage()));
+        buttonRow.Children.Add(CreateSupportCoffeeButton((_, _) =>
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "https://buymeacoffee.com/koerby",
+                UseShellExecute = true
+            });
+        }));
         buttonRow.Children.Add(CreateIconButton("🔗", "usbip-win2 Quelle", onClick: (_, _) => OpenUsbipClientRepository()));
         buttonRow.Children.Add(CreateIconButton("🔗", "WinFsp Quelle", onClick: (_, _) => OpenWinFspRepository()));
         panel.Children.Add(buttonRow);
@@ -5013,6 +5021,47 @@ internal sealed class GuestMainWindow : Window
             button.Click += onClick;
         }
 
+        return button;
+    }
+
+    private static Button CreateSupportCoffeeButton(RoutedEventHandler onClick)
+    {
+        var textBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0x2E, 0x20, 0x00));
+        var content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        content.Children.Add(new TextBlock
+        {
+            Text = "☕",
+            FontSize = 18,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = textBrush,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        content.Children.Add(new TextBlock
+        {
+            Text = "Buy Me a Coffee",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = textBrush,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        var button = new Button
+        {
+            Content = content,
+            Padding = new Thickness(10, 7, 10, 7),
+            CornerRadius = new CornerRadius(10),
+            BorderThickness = new Thickness(1),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0xC9, 0x9B, 0x00)),
+            Background = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xDD, 0x00))
+        };
+
+        button.Click += onClick;
         return button;
     }
 

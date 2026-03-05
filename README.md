@@ -9,6 +9,7 @@ HyperTool ist ein WinUI-3 Toolset für Hyper-V-Host und Windows-Guest mit Fokus 
 - Guest nutzt `WinFsp` als zusätzliche Runtime für Shared-Folder-Mounts inkl. Runtime-Status, Installationshinweis und Quellenangabe.
 - Host und Guest enthalten konsistente Runtime-Statusanzeigen (USB/Shared Folder) mit Installations- und Neustart-Aktionen.
 - `Tool neu starten` ist in Host/Guest (USB/Shared Folder/Config) vereinheitlicht und zeigt wie beim Theme-Wechsel kurz den Reload-Screen.
+- Info-Menü in Host und Guest enthält jetzt einen gelben `Buy Me a Coffee`-Support-Button.
 - Guest-Info führt externe Quellen (`usbip-win2`, `winfsp`) nebeneinander mit symmetrischem Kartenlayout.
 - Host VM-Chips wurden visuell nachgeschliffen (kompaktere Breite, klarere Default-Markierung, größere/lesbarere Icon-Badges).
 - Default-VM und Schnellstart-Verknüpfung sind als direkte VM-Kontextaktionen verfügbar (Chip-/VM-Menü).
@@ -70,6 +71,12 @@ Hinweise:
 - HyperTool selbst steht unter der MIT-Lizenz (siehe `LICENSE`).
 - Externe Runtimes (`usbipd-win`, `usbip-win2`, `winfsp`) sind eigenständige Projekte mit eigenen Lizenzen.
 - In Host-/Guest-Info und in der Hilfe sind die jeweiligen Quellen verlinkt; verbindlich sind immer die Lizenztexte der Original-Repositories.
+
+## Support
+
+Wenn dir HyperTool hilft und du das Projekt unterstützen möchtest:
+
+- Buy Me a Coffee: https://buymeacoffee.com/koerby
 
 ## Voraussetzungen
 
