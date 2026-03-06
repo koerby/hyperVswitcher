@@ -4,7 +4,13 @@ namespace HyperTool.Services;
 
 public static class UsbGuestConnectionRegistry
 {
-    private static readonly ConcurrentDictionary<string, string> ConnectedGuestsByBusId = new(StringComparer.OrdinalIgnoreCase);
+    private sealed class GuestConnectionEntry
+    {
+        public string GuestComputerName { get; init; } = string.Empty;
+        public DateTimeOffset LastSeenUtc { get; init; }
+    }
+
+    private static readonly ConcurrentDictionary<string, GuestConnectionEntry> ConnectedGuestsByBusId = new(StringComparer.OrdinalIgnoreCase);
 
     public static void UpdateFromDiagnosticsAck(HyperVSocketDiagnosticsAck ack)
     {
@@ -28,10 +34,15 @@ public static class UsbGuestConnectionRegistry
             return;
         }
 
-        if (string.Equals(eventType, "usb-connected", StringComparison.OrdinalIgnoreCase)
+        if ((string.Equals(eventType, "usb-connected", StringComparison.OrdinalIgnoreCase)
+             || string.Equals(eventType, "usb-heartbeat", StringComparison.OrdinalIgnoreCase))
             && !string.IsNullOrWhiteSpace(guestComputerName))
         {
-            ConnectedGuestsByBusId[busId] = guestComputerName;
+            ConnectedGuestsByBusId[busId] = new GuestConnectionEntry
+            {
+                GuestComputerName = guestComputerName,
+                LastSeenUtc = DateTimeOffset.UtcNow
+            };
         }
     }
 
@@ -44,6 +55,35 @@ public static class UsbGuestConnectionRegistry
             return false;
         }
 
-        return ConnectedGuestsByBusId.TryGetValue(busId.Trim(), out guestComputerName!);
+        if (!ConnectedGuestsByBusId.TryGetValue(busId.Trim(), out var entry))
+        {
+            return false;
+        }
+
+        guestComputerName = entry.GuestComputerName;
+        return true;
+    }
+
+    public static bool TryGetFreshGuestComputerName(string? busId, TimeSpan maxAge, out string guestComputerName)
+    {
+        guestComputerName = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(busId))
+        {
+            return false;
+        }
+
+        if (!ConnectedGuestsByBusId.TryGetValue(busId.Trim(), out var entry))
+        {
+            return false;
+        }
+
+        if ((DateTimeOffset.UtcNow - entry.LastSeenUtc) > maxAge)
+        {
+            return false;
+        }
+
+        guestComputerName = entry.GuestComputerName;
+        return true;
     }
 }

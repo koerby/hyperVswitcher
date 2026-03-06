@@ -1733,17 +1733,24 @@ public partial class MainViewModel : ViewModelBase
                 return;
             }
 
-            UsbDevices.Clear();
-            foreach (var device in devices)
+            var preparedDevices = devices.ToList();
+            foreach (var device in preparedDevices)
             {
                 if (device.IsAttached
                     && !string.IsNullOrWhiteSpace(device.BusId)
-                    && UsbGuestConnectionRegistry.TryGetGuestComputerName(device.BusId, out var guestComputerName))
+                    && UsbGuestConnectionRegistry.TryGetFreshGuestComputerName(device.BusId, StaleUsbAttachGracePeriod, out var guestComputerName))
                 {
                     device.AttachedGuestComputerName = guestComputerName;
                 }
+            }
 
-                UsbDevices.Add(device);
+            if (!UsbDeviceListsMatch(UsbDevices, preparedDevices))
+            {
+                UsbDevices.Clear();
+                foreach (var device in preparedDevices)
+                {
+                    UsbDevices.Add(device);
+                }
             }
 
             SelectedUsbDevice = UsbDevices.FirstOrDefault(device =>
@@ -1816,7 +1823,7 @@ public partial class MainViewModel : ViewModelBase
                 continue;
             }
 
-            if (UsbGuestConnectionRegistry.TryGetGuestComputerName(busId, out _))
+            if (UsbGuestConnectionRegistry.TryGetFreshGuestComputerName(busId, StaleUsbAttachGracePeriod, out _))
             {
                 _usbAttachedWithoutAckSinceUtc.Remove(busId);
                 continue;
@@ -1847,6 +1854,35 @@ public partial class MainViewModel : ViewModelBase
         }
 
         return detachedCount;
+    }
+
+    private static bool UsbDeviceListsMatch(IList<UsbIpDeviceInfo> current, IReadOnlyList<UsbIpDeviceInfo> next)
+    {
+        if (current.Count != next.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < current.Count; i++)
+        {
+            if (!UsbDeviceVisualMatch(current[i], next[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool UsbDeviceVisualMatch(UsbIpDeviceInfo left, UsbIpDeviceInfo right)
+    {
+        return string.Equals(left.BusId?.Trim(), right.BusId?.Trim(), StringComparison.OrdinalIgnoreCase)
+               && string.Equals(left.Description?.Trim(), right.Description?.Trim(), StringComparison.Ordinal)
+               && string.Equals(left.HardwareId?.Trim(), right.HardwareId?.Trim(), StringComparison.OrdinalIgnoreCase)
+               && string.Equals(left.InstanceId?.Trim(), right.InstanceId?.Trim(), StringComparison.OrdinalIgnoreCase)
+               && string.Equals(left.PersistedGuid?.Trim(), right.PersistedGuid?.Trim(), StringComparison.OrdinalIgnoreCase)
+               && string.Equals(left.ClientIpAddress?.Trim(), right.ClientIpAddress?.Trim(), StringComparison.OrdinalIgnoreCase)
+               && string.Equals(left.AttachedGuestComputerName?.Trim(), right.AttachedGuestComputerName?.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static string BuildUsbUnavailableStatus(string? details)

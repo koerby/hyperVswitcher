@@ -24,6 +24,7 @@ public sealed partial class App : Application
 {
     private const int GuestUsbAutoRefreshSeconds = 4;
     private const int GuestUsbAutoConnectFailureBackoffSeconds = 20;
+    private const int GuestUsbHeartbeatIntervalSeconds = 12;
     private const int SharedFolderCatalogFetchMaxAttempts = 3;
     private static readonly TimeSpan RecurringWarnRateLimitInterval = TimeSpan.FromMinutes(2);
     private const string GuestWindowTitle = "HyperTool Guest";
@@ -100,6 +101,7 @@ public sealed partial class App : Application
 
     private readonly List<UsbIpDeviceInfo> _usbDevices = [];
     private readonly Dictionary<string, DateTimeOffset> _usbAutoConnectBackoffUntilUtc = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _usbHeartbeatLastSentByBusId = new(StringComparer.OrdinalIgnoreCase);
     private string? _selectedUsbBusId;
     private bool _isUsbClientAvailable;
     private bool _usbClientMissingLogged;
@@ -2448,6 +2450,8 @@ public sealed partial class App : Application
         return message.Contains("device in error state", StringComparison.OrdinalIgnoreCase)
                || message.Contains("error state", StringComparison.OrdinalIgnoreCase)
                || message.Contains("resource busy", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("already exported", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("device busy", StringComparison.OrdinalIgnoreCase)
                || message.Contains("temporarily unavailable", StringComparison.OrdinalIgnoreCase)
                || message.Contains("already in use", StringComparison.OrdinalIgnoreCase);
     }
@@ -3130,6 +3134,11 @@ public sealed partial class App : Application
                 {
                     await RefreshUsbDevicesAsync(emitLogs: false);
                 }
+
+                if (!_isExitRequested && _config?.Usb?.Enabled != false)
+                {
+                    await TrySendAttachedUsbHeartbeatsAsync(cancellationToken);
+                }
             }
             catch
             {
@@ -3502,7 +3511,6 @@ public sealed partial class App : Application
 
         var now = DateTimeOffset.UtcNow;
         var backoffSkipped = 0;
-        var notSharedSkipped = 0;
 
         var expiredBackoffKeys = _usbAutoConnectBackoffUntilUtc
             .Where(entry => entry.Value <= now)
@@ -3518,32 +3526,11 @@ public sealed partial class App : Application
             .Where(device =>
                 !string.IsNullOrWhiteSpace(device.BusId)
                 && !device.IsAttached
-                && device.IsShared
                 && keySet.Contains(BuildUsbAutoConnectKey(device))
                 && IsUsbAutoConnectAllowedNow(device.BusId!.Trim(), now, ref backoffSkipped))
             .Select(device => device.BusId.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-
-        foreach (var device in devices)
-        {
-            if (string.IsNullOrWhiteSpace(device.BusId))
-            {
-                continue;
-            }
-
-            if (device.IsAttached || device.IsShared)
-            {
-                continue;
-            }
-
-            if (!keySet.Contains(BuildUsbAutoConnectKey(device)))
-            {
-                continue;
-            }
-
-            notSharedSkipped++;
-        }
 
         if (backoffSkipped > 0)
         {
@@ -3554,19 +3541,6 @@ public sealed partial class App : Application
                 {
                     skipped = backoffSkipped,
                     backoffSeconds = GuestUsbAutoConnectFailureBackoffSeconds
-                },
-                scopeKey: "global",
-                minInterval: RecurringWarnRateLimitInterval);
-        }
-
-        if (notSharedSkipped > 0)
-        {
-            WarnRateLimited(
-                eventName: "usb.autoconnect.skipped.not_shared",
-                message: "USB Auto-Connect übersprungen: Gerät ist auf dem Host aktuell nicht freigegeben.",
-                data: new
-                {
-                    skipped = notSharedSkipped
                 },
                 scopeKey: "global",
                 minInterval: RecurringWarnRateLimitInterval);
@@ -3855,6 +3829,49 @@ public sealed partial class App : Application
         }
         catch
         {
+        }
+    }
+
+    private async Task TrySendAttachedUsbHeartbeatsAsync(CancellationToken cancellationToken)
+    {
+        if (_usbDevices.Count == 0)
+        {
+            _usbHeartbeatLastSentByBusId.Clear();
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var attachedBusIds = _usbDevices
+            .Where(device => device.IsAttached && !string.IsNullOrWhiteSpace(device.BusId))
+            .Select(device => device.BusId.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (attachedBusIds.Count == 0)
+        {
+            _usbHeartbeatLastSentByBusId.Clear();
+            return;
+        }
+
+        var obsoleteBusIds = _usbHeartbeatLastSentByBusId.Keys
+            .Where(busId => !attachedBusIds.Contains(busId, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        foreach (var obsoleteBusId in obsoleteBusIds)
+        {
+            _usbHeartbeatLastSentByBusId.Remove(obsoleteBusId);
+        }
+
+        foreach (var busId in attachedBusIds)
+        {
+            if (_usbHeartbeatLastSentByBusId.TryGetValue(busId, out var lastSentUtc)
+                && (now - lastSentUtc) < TimeSpan.FromSeconds(GuestUsbHeartbeatIntervalSeconds))
+            {
+                continue;
+            }
+
+            await TrySendUsbConnectionEventAckAsync(busId, "usb-heartbeat", cancellationToken);
+            _usbHeartbeatLastSentByBusId[busId] = DateTimeOffset.UtcNow;
         }
     }
 
