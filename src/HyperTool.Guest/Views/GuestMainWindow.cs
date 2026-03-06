@@ -3208,7 +3208,13 @@ internal sealed class GuestMainWindow : Window
 
         var usbipStack = new StackPanel { Spacing = 4 };
         usbipStack.Children.Add(new TextBlock { Text = "Externe USB/IP Quelle", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        usbipStack.Children.Add(new TextBlock { Text = "Quelle: vadimgrn/usbip-win2", Opacity = 0.9 });
+        usbipStack.Children.Add(new HyperlinkButton
+        {
+            Content = "Quelle: vadimgrn/usbip-win2",
+            NavigateUri = new Uri("https://github.com/vadimgrn/usbip-win2"),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0)
+        });
         usbipStack.Children.Add(new TextBlock { Text = "Nutzung in HyperTool: externer CLI-Client ohne eigene GUI-Integration.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
         usbipStack.Children.Add(new TextBlock { Text = "Lizenz/Eigentümer: siehe Original-Repository von vadimgrn.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
         usbipCard.Child = usbipStack;
@@ -3224,7 +3230,13 @@ internal sealed class GuestMainWindow : Window
 
         var winfspStack = new StackPanel { Spacing = 4 };
         winfspStack.Children.Add(new TextBlock { Text = "Externe Shared-Folder Runtime", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        winfspStack.Children.Add(new TextBlock { Text = "Quelle: winfsp/winfsp", Opacity = 0.9 });
+        winfspStack.Children.Add(new HyperlinkButton
+        {
+            Content = "Quelle: winfsp/winfsp",
+            NavigateUri = new Uri($"https://github.com/{WinFspRuntimeOwner}/{WinFspRuntimeRepo}"),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0)
+        });
         winfspStack.Children.Add(new TextBlock { Text = "Nutzung in HyperTool: externer Runtime-Treiber für Guest Shared-Folder-Mounts.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
         winfspStack.Children.Add(new TextBlock { Text = "Lizenz/Eigentümer: siehe Original-Repository von winfsp.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
         winfspCard.Child = winfspStack;
@@ -3304,8 +3316,6 @@ internal sealed class GuestMainWindow : Window
                 UseShellExecute = true
             });
         }));
-        buttonRow.Children.Add(CreateIconButton("🔗", "usbip-win2 Quelle", onClick: (_, _) => OpenUsbipClientRepository()));
-        buttonRow.Children.Add(CreateIconButton("🔗", "WinFsp Quelle", onClick: (_, _) => OpenWinFspRepository()));
         panel.Children.Add(buttonRow);
 
         return new ScrollViewer { Content = panel };
@@ -4319,24 +4329,6 @@ internal sealed class GuestMainWindow : Window
         });
     }
 
-    private void OpenUsbipClientRepository()
-    {
-        Process.Start(new ProcessStartInfo
-        {
-            FileName = "https://github.com/vadimgrn/usbip-win2",
-            UseShellExecute = true
-        });
-    }
-
-    private void OpenWinFspRepository()
-    {
-        Process.Start(new ProcessStartInfo
-        {
-            FileName = $"https://github.com/{WinFspRuntimeOwner}/{WinFspRuntimeRepo}",
-            UseShellExecute = true
-        });
-    }
-
     private async Task InstallGuestUsbRuntimeAsync()
     {
         if (_usbRuntimeInstallButton is not null)
@@ -4589,6 +4581,9 @@ internal sealed class GuestMainWindow : Window
 
         try
         {
+            AppendNotification("[Info] Speichere aktuelle Einstellungen vor dem Update ...");
+            await SaveSettingsAsync();
+
             AppendNotification("[Info] Lade Update-Installer herunter...");
 
             var targetDirectory = IOPath.Combine(IOPath.GetTempPath(), "HyperTool", "updates");

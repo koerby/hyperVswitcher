@@ -314,6 +314,7 @@ public sealed partial class App : Application
                 var seconds = (DateTimeOffset.UtcNow - startedAtUtc).TotalSeconds;
                 ApplyTrollPalette(seconds);
                 UpdateTrollOverlayScene(seconds);
+                ApplyTrollSceneWarp(seconds);
 
                 await Task.Delay(80, cts.Token);
             }
@@ -463,16 +464,39 @@ public sealed partial class App : Application
         }
 
         Grid hostGrid;
+        var sceneContainer = new Grid();
         if (currentContent is Grid existingGrid)
         {
             hostGrid = existingGrid;
+            CopyGridLayout(existingGrid, sceneContainer);
+
+            var existingChildren = existingGrid.Children.ToList();
+            existingGrid.Children.Clear();
+            foreach (var child in existingChildren)
+            {
+                sceneContainer.Children.Add(child);
+            }
+
+            if (existingGrid.RowDefinitions.Count > 0)
+            {
+                Grid.SetRowSpan(sceneContainer, existingGrid.RowDefinitions.Count);
+            }
+
+            if (existingGrid.ColumnDefinitions.Count > 0)
+            {
+                Grid.SetColumnSpan(sceneContainer, existingGrid.ColumnDefinitions.Count);
+            }
+
+            existingGrid.Children.Add(sceneContainer);
+            _trollSceneTarget = sceneContainer;
         }
         else
         {
             hostGrid = new Grid();
             _mainWindow.Content = hostGrid;
-            hostGrid.Children.Add(currentContent);
-            _trollSceneTarget = currentContent;
+            sceneContainer.Children.Add(currentContent);
+            hostGrid.Children.Add(sceneContainer);
+            _trollSceneTarget = sceneContainer;
         }
 
         _trollOverlayHost = hostGrid;
@@ -549,11 +573,11 @@ public sealed partial class App : Application
         Canvas.SetZIndex(_trollOverlayBoss, 7003);
         Canvas.SetZIndex(_trollOverlayStatus, 7004);
 
-        ConfigureTrollOverlayPlacement(hostGrid, _trollOverlayDimmer);
-        ConfigureTrollOverlayPlacement(hostGrid, _trollOverlayCrater);
-        ConfigureTrollOverlayPlacement(hostGrid, _trollOverlayCanvas);
-        ConfigureTrollOverlayPlacement(hostGrid, _trollOverlayBoss);
-        ConfigureTrollOverlayPlacement(hostGrid, _trollOverlayStatus);
+        ApplyOverlayElementPlacement(hostGrid, _trollOverlayDimmer);
+        ApplyOverlayElementPlacement(hostGrid, _trollOverlayCrater);
+        ApplyOverlayElementPlacement(hostGrid, _trollOverlayCanvas);
+        ApplyOverlayElementPlacement(hostGrid, _trollOverlayBoss);
+        ApplyOverlayElementPlacement(hostGrid, _trollOverlayStatus);
 
         hostGrid.Children.Add(_trollOverlayDimmer);
         hostGrid.Children.Add(_trollOverlayCrater);
@@ -562,18 +586,43 @@ public sealed partial class App : Application
         hostGrid.Children.Add(_trollOverlayStatus);
     }
 
-    private static void ConfigureTrollOverlayPlacement(Grid hostGrid, FrameworkElement element)
+    private static void ApplyOverlayElementPlacement(Grid hostGrid, FrameworkElement element)
     {
-        var rowCount = Math.Max(1, hostGrid.RowDefinitions.Count);
-        var columnCount = Math.Max(1, hostGrid.ColumnDefinitions.Count);
+        var rowSpan = Math.Max(1, hostGrid.RowDefinitions.Count);
+        var columnSpan = Math.Max(1, hostGrid.ColumnDefinitions.Count);
 
-        var startRow = rowCount > 1 ? 1 : 0;
-        var rowSpan = rowCount - startRow;
-
-        Grid.SetRow(element, startRow);
-        Grid.SetRowSpan(element, Math.Max(1, rowSpan));
+        Grid.SetRow(element, 0);
         Grid.SetColumn(element, 0);
-        Grid.SetColumnSpan(element, columnCount);
+        Grid.SetRowSpan(element, rowSpan);
+        Grid.SetColumnSpan(element, columnSpan);
+    }
+
+    private static void CopyGridLayout(Grid source, Grid target)
+    {
+        target.RowSpacing = source.RowSpacing;
+        target.ColumnSpacing = source.ColumnSpacing;
+
+        target.RowDefinitions.Clear();
+        foreach (var row in source.RowDefinitions)
+        {
+            target.RowDefinitions.Add(new RowDefinition
+            {
+                Height = row.Height,
+                MinHeight = row.MinHeight,
+                MaxHeight = row.MaxHeight
+            });
+        }
+
+        target.ColumnDefinitions.Clear();
+        foreach (var column in source.ColumnDefinitions)
+        {
+            target.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = column.Width,
+                MinWidth = column.MinWidth,
+                MaxWidth = column.MaxWidth
+            });
+        }
     }
 
     private void ResetTrollOverlayScene()
@@ -820,6 +869,8 @@ public sealed partial class App : Application
 
     private void HideTrollOverlay()
     {
+        ResetTrollSceneWarp();
+
         if (_trollOverlayHost is not null)
         {
             if (_trollOverlayDimmer is not null)
@@ -890,7 +941,36 @@ public sealed partial class App : Application
 
     private void ApplyTrollSceneWarp(double seconds)
     {
-        ResetTrollSceneWarp();
+        if (_trollSceneTranslate is null || _trollSceneRotate is null)
+        {
+            return;
+        }
+
+        if (seconds < 4d)
+        {
+            ResetTrollSceneWarp();
+            return;
+        }
+
+        var intensity = seconds switch
+        {
+            < 9d => 2.4d,
+            < 20d => 5.4d,
+            < 25d => 8.2d,
+            < 27d => 4.2d,
+            _ => 11.5d
+        };
+
+        var wobbleX = Math.Sin(seconds * 31d) * intensity
+                      + Math.Sin(seconds * 67d) * (intensity * 0.45d);
+        var wobbleY = Math.Cos(seconds * 28d) * (intensity * 0.75d)
+                      + Math.Sin(seconds * 53d) * (intensity * 0.32d);
+
+        _trollSceneTranslate.X = wobbleX;
+        _trollSceneTranslate.Y = wobbleY;
+
+        var maxAngle = intensity * 0.35d;
+        _trollSceneRotate.Angle = Math.Clamp(Math.Sin(seconds * 9.5d) * maxAngle, -8d, 8d);
     }
 
     private void ResetTrollSceneWarp()
@@ -1122,6 +1202,7 @@ public sealed partial class App : Application
         }
 
         _configPath = ResolveConfigPath(parsedArgs);
+        GuestConfigService.TryMigrateLegacyConfig(_configPath);
         _config = GuestConfigService.LoadOrCreate(_configPath, out _);
         _currentUsbTransportUseHyperVSocket = _config.Usb?.UseHyperVSocket != false;
         GuestLogger.Initialize(_config.Logging);

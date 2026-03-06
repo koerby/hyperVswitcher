@@ -1,7 +1,9 @@
 using HyperTool.Models;
 using Serilog;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 
@@ -121,9 +123,155 @@ public sealed class HyperVPowerShellService : IHyperVService
         return InvokeNonQueryAsync(script, cancellationToken);
     }
 
+    public async Task<string> GetHostNetworkProfileCategoryAsync(CancellationToken cancellationToken)
+    {
+        const string script = """
+            $profiles = @(
+                Get-NetConnectionProfile -ErrorAction SilentlyContinue |
+                    Where-Object {
+                        ($_.IPv4Connectivity -ne 'Disconnected') -or ($_.IPv6Connectivity -ne 'Disconnected')
+                    }
+            )
+
+            if ($profiles.Count -eq 0)
+            {
+                $profiles = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue)
+            }
+
+            $categories = @($profiles | ForEach-Object {
+                if ($null -ne $_.NetworkCategory) { $_.NetworkCategory.ToString() } else { '' }
+            } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+            if ($categories -contains 'Public')
+            {
+                'Public'
+                return
+            }
+
+            if ($categories -contains 'DomainAuthenticated')
+            {
+                'DomainAuthenticated'
+                return
+            }
+
+            if ($categories -contains 'Private')
+            {
+                'Private'
+                return
+            }
+
+            if ($categories.Count -gt 0)
+            {
+                $categories[0]
+                return
+            }
+
+            'Unknown'
+            """;
+
+        var output = await InvokePowerShellAsync(script, cancellationToken);
+        return string.IsNullOrWhiteSpace(output) ? "Unknown" : output.Trim();
+    }
+
+    public async Task SetHostNetworkProfileCategoryAsync(string adapterName, string networkCategory, CancellationToken cancellationToken)
+    {
+        var script =
+            $"$adapterName = {ToPsSingleQuoted(adapterName ?? string.Empty)}; " +
+            $"$networkCategory = {ToPsSingleQuoted(networkCategory ?? string.Empty)}; " +
+            "$networkCategory = if ([string]::IsNullOrWhiteSpace($networkCategory)) { '' } else { $networkCategory.Trim() }; " +
+            "if ($networkCategory -notin @('Public','Private')) { throw \"Ungültige Netzprofil-Kategorie. Erlaubt: Public oder Private.\" }; " +
+            "$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); " +
+            "if (-not $isAdmin) { throw \"Zum Ändern des Host-Netzprofils sind Administratorrechte erforderlich.\" }; " +
+            "$profiles = @(); " +
+            "if (-not [string]::IsNullOrWhiteSpace($adapterName)) { $profiles = @(Get-NetConnectionProfile -InterfaceAlias $adapterName -ErrorAction SilentlyContinue) }; " +
+            "if ($profiles.Count -eq 0 -and [string]::IsNullOrWhiteSpace($adapterName)) { " +
+            "  $profiles = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { ($_.IPv4Connectivity -ne 'Disconnected') -or ($_.IPv6Connectivity -ne 'Disconnected') }); " +
+            "  if ($profiles.Count -eq 0) { $profiles = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue) }; " +
+            "}; " +
+            "if ($profiles.Count -eq 0) { throw \"Kein passendes Netzprofil gefunden.\" }; " +
+            "$domainSkipped = 0; " +
+            "$changed = 0; " +
+            "foreach ($profile in $profiles) { " +
+            "  if ($null -eq $profile.InterfaceIndex) { continue }; " +
+            "  $currentCategory = if ($null -ne $profile.NetworkCategory) { $profile.NetworkCategory.ToString() } else { '' }; " +
+            "  if ($currentCategory -eq 'DomainAuthenticated') { $domainSkipped++; continue }; " +
+            "  if ($currentCategory -eq $networkCategory) { continue }; " +
+            "  try { " +
+            "    Set-NetConnectionProfile -InterfaceIndex $profile.InterfaceIndex -NetworkCategory $networkCategory -ErrorAction Stop; " +
+            "    $changed++; " +
+            "  } catch { " +
+            "    $message = $_.Exception.Message; " +
+            "    if ($message -match 'Network List Manager Policies|Group Policy') { throw \"Netzprofiländerung ist durch Gruppenrichtlinie blockiert.\" }; " +
+            "    throw; " +
+            "  }; " +
+            "}; " +
+            "if ($changed -eq 0 -and $domainSkipped -gt 0) { throw \"Domänenprofile können nicht manuell auf Privat/Öffentlich umgestellt werden.\" }; " +
+            "Write-Output 'HT_OK'";
+
+        try
+        {
+            await InvokePowerShellElevatedNonQueryAsync(script, cancellationToken);
+        }
+        catch (UnauthorizedAccessException ex) when (ex.Message.Contains("UAC", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UnauthorizedAccessException("UAC-Bestätigung abgebrochen. Netzprofil wurde nicht geändert.");
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not running PowerShell elevated", StringComparison.OrdinalIgnoreCase)
+                                                 || ex.Message.Contains("Administratorrechte", StringComparison.OrdinalIgnoreCase)
+                                                 || ex.Message.Contains("PermissionDenied", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UnauthorizedAccessException("Administratorrechte wurden nicht erteilt. Netzprofil wurde nicht geändert.");
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("DomainAuthenticated", StringComparison.OrdinalIgnoreCase)
+                                                 || ex.Message.Contains("Domänenprofile", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Domänenprofile können nicht manuell geändert werden.");
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("Network List Manager Policies", StringComparison.OrdinalIgnoreCase)
+                                                 || ex.Message.Contains("Group Policy", StringComparison.OrdinalIgnoreCase)
+                                                 || ex.Message.Contains("Gruppenrichtlinie", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Netzprofiländerung ist durch Gruppenrichtlinie blockiert.");
+        }
+    }
+
     public async Task<IReadOnlyList<HostNetworkAdapterInfo>> GetHostNetworkAdaptersWithUplinkAsync(CancellationToken cancellationToken)
     {
         const string script = """
+            function Resolve-NetworkCategory {
+                param(
+                    [string]$InterfaceAlias,
+                    [int]$InterfaceIndex
+                )
+
+                $profiles = @()
+
+                if (-not [string]::IsNullOrWhiteSpace($InterfaceAlias))
+                {
+                    $profiles = @(Get-NetConnectionProfile -InterfaceAlias $InterfaceAlias -ErrorAction SilentlyContinue)
+                }
+
+                if ($profiles.Count -eq 0 -and $InterfaceIndex -gt 0)
+                {
+                    $profiles = @(Get-NetConnectionProfile -InterfaceIndex $InterfaceIndex -ErrorAction SilentlyContinue)
+                }
+
+                $categories = @($profiles | ForEach-Object {
+                    if ($null -ne $_.NetworkCategory) { $_.NetworkCategory.ToString() } else { '' }
+                } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+                if ($categories -contains 'Public') { return 'Public' }
+                if ($categories -contains 'DomainAuthenticated') { return 'DomainAuthenticated' }
+                if ($categories -contains 'Private') { return 'Private' }
+
+                if ($categories.Count -gt 0)
+                {
+                    return $categories[0]
+                }
+
+                return ''
+            }
+
             $items = @(
                 Get-NetIPConfiguration -Detailed -ErrorAction SilentlyContinue |
                     Where-Object {
@@ -156,6 +304,7 @@ public sealed class HyperVPowerShellService : IHyperVService
                             Subnets = if ($prefixes.Count -gt 0) { $prefixes -join ', ' } else { '' }
                             Gateway = if ($gatewayCandidates.Count -gt 0) { $gatewayCandidates -join ', ' } else { '' }
                             DnsServers = if ($dnsServers.Count -gt 0) { $dnsServers -join ', ' } else { '' }
+                            NetworkProfileCategory = Resolve-NetworkCategory -InterfaceAlias $adapter.Name -InterfaceIndex $adapter.ifIndex
                             IsDefaultSwitch = ($adapter.Name -like 'vEthernet (*Default Switch*)')
                         }
                     }
@@ -201,6 +350,7 @@ public sealed class HyperVPowerShellService : IHyperVService
                     Subnets = if ($prefixes.Count -gt 0) { $prefixes -join ', ' } else { '' }
                     Gateway = if ($gatewayCandidates.Count -gt 0) { $gatewayCandidates -join ', ' } else { '' }
                     DnsServers = if ($dnsServers.Count -gt 0) { $dnsServers -join ', ' } else { '' }
+                    NetworkProfileCategory = Resolve-NetworkCategory -InterfaceAlias $adapter.Name -InterfaceIndex $adapter.ifIndex
                     IsDefaultSwitch = $true
                 }
 
@@ -294,6 +444,7 @@ public sealed class HyperVPowerShellService : IHyperVService
                         Subnets = if ($prefixes.Count -gt 0) { $prefixes -join ', ' } else { '' }
                         Gateway = if ($gatewayCandidates.Count -gt 0) { $gatewayCandidates -join ', ' } else { '' }
                         DnsServers = if ($dnsServers.Count -gt 0) { $dnsServers -join ', ' } else { '' }
+                        NetworkProfileCategory = Resolve-NetworkCategory -InterfaceAlias $defaultAlias -InterfaceIndex $(if ($null -ne $defaultAdapter) { $defaultAdapter.ifIndex } else { 0 })
                         IsDefaultSwitch = $true
                     }
                 }
@@ -311,6 +462,7 @@ public sealed class HyperVPowerShellService : IHyperVService
             Subnets = GetString(row, "Subnets"),
             Gateway = GetString(row, "Gateway"),
             DnsServers = GetString(row, "DnsServers"),
+            NetworkProfileCategory = GetString(row, "NetworkProfileCategory"),
             IsDefaultSwitch = GetBoolean(row, "IsDefaultSwitch")
         }).ToList();
     }
@@ -595,9 +747,9 @@ public sealed class HyperVPowerShellService : IHyperVService
                      $"$requestedFolderName = {ToPsSingleQuoted(requestedFolderName ?? string.Empty)}; " +
                      $"$importMode = {ToPsSingleQuoted(importMode ?? string.Empty)}.ToLowerInvariant(); " +
                      "if (-not (Test-Path -LiteralPath $importPath)) { throw \"Import-Pfad nicht gefunden: $importPath\" }; " +
-                     "if ([string]::IsNullOrWhiteSpace($destinationPath)) { throw \"Zielpfad für den Import fehlt.\" }; " +
-                     "if (-not (Test-Path -LiteralPath $destinationPath -PathType Container)) { New-Item -Path $destinationPath -ItemType Directory -Force | Out-Null }; " +
                      "if (@('copy','register','restore') -notcontains $importMode) { $importMode = 'copy' }; " +
+                     "if ($importMode -eq 'copy' -and [string]::IsNullOrWhiteSpace($destinationPath)) { throw \"Zielpfad für den Import fehlt.\" }; " +
+                     "if ($importMode -eq 'copy' -and -not (Test-Path -LiteralPath $destinationPath -PathType Container)) { New-Item -Path $destinationPath -ItemType Directory -Force | Out-Null }; " +
                      "$existingVms = @(Get-VM -ErrorAction SilentlyContinue); " +
                      "$existingVmNames = @($existingVms | Select-Object -ExpandProperty Name); " +
                      "$existingVmIds = @($existingVms | Select-Object -ExpandProperty Id); " +
@@ -811,6 +963,95 @@ public sealed class HyperVPowerShellService : IHyperVService
         }
 
         return standardOutput.Trim();
+    }
+
+    private static async Task InvokePowerShellElevatedNonQueryAsync(string script, CancellationToken cancellationToken)
+    {
+        var statusFilePath = Path.Combine(Path.GetTempPath(), $"hypertool-netprofile-{Guid.NewGuid():N}.txt");
+        var statusFilePathPs = ToPsSingleQuoted(statusFilePath);
+
+        var wrappedScript =
+            "$ErrorActionPreference = 'Stop'; " +
+            "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; " +
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
+            "$OutputEncoding = [System.Text.Encoding]::UTF8; " +
+            "$statusFilePath = " + statusFilePathPs + "; " +
+            "$statusDir = Split-Path -Parent -Path $statusFilePath; " +
+            "if (-not [string]::IsNullOrWhiteSpace($statusDir) -and -not (Test-Path -LiteralPath $statusDir)) { New-Item -Path $statusDir -ItemType Directory -Force | Out-Null }; " +
+            "Import-Module Hyper-V -ErrorAction Stop; " +
+            "try { " +
+            script + "; " +
+            "Set-Content -LiteralPath $statusFilePath -Value 'OK' -Encoding UTF8 -Force; " +
+            "} catch { " +
+            "$msg = if ($null -ne $_.Exception -and -not [string]::IsNullOrWhiteSpace($_.Exception.Message)) { $_.Exception.Message } else { ($_ | Out-String) }; " +
+            "Set-Content -LiteralPath $statusFilePath -Value ('ERROR:' + $msg) -Encoding UTF8 -Force; " +
+            "exit 1; " +
+            "}";
+
+        var encodedScript = Convert.ToBase64String(Encoding.Unicode.GetBytes(wrappedScript));
+        var args = $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encodedScript}";
+
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = args,
+                UseShellExecute = true,
+                Verb = "runas",
+                WorkingDirectory = Environment.CurrentDirectory
+            };
+
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                throw new InvalidOperationException("Erhöhter PowerShell-Prozess konnte nicht gestartet werden.");
+            }
+
+            await process.WaitForExitAsync(cancellationToken);
+
+            string? statusText = null;
+            if (File.Exists(statusFilePath))
+            {
+                statusText = await File.ReadAllTextAsync(statusFilePath, cancellationToken);
+            }
+
+            if (!string.IsNullOrWhiteSpace(statusText))
+            {
+                var trimmed = statusText.Trim();
+                if (trimmed.StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(trimmed["ERROR:".Length..].Trim());
+                }
+
+                if (trimmed.Equals("OK", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException("Erhöhte Ausführung fehlgeschlagen.");
+            }
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            throw new UnauthorizedAccessException("UAC-Abfrage wurde vom Benutzer abgebrochen.", ex);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(statusFilePath))
+                {
+                    File.Delete(statusFilePath);
+                }
+            }
+            catch
+            {
+            }
+        }
     }
 
     private static async Task<string> InvokePowerShellWithProgressAsync(string script, IProgress<int>? progress, CancellationToken cancellationToken)

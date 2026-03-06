@@ -306,6 +306,14 @@ public sealed class ConfigService : IConfigService
             wasUpdated = true;
         }
 
+        var normalizedNumLockWatcherIntervalSeconds = Math.Clamp(config.Ui.NumLockWatcherIntervalSeconds, 5, 600);
+        if (config.Ui.NumLockWatcherIntervalSeconds != normalizedNumLockWatcherIntervalSeconds)
+        {
+            config.Ui.NumLockWatcherIntervalSeconds = normalizedNumLockWatcherIntervalSeconds;
+            wasUpdated = true;
+            notices.Add("Ui.NumLockWatcherIntervalSeconds war außerhalb des gültigen Bereichs und wurde korrigiert (5-600).");
+        }
+
         if (!config.Ui.EnableTrayIcon)
         {
             config.Ui.EnableTrayIcon = true;

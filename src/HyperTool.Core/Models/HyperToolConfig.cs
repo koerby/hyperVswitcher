@@ -22,6 +22,8 @@ public sealed class HyperToolConfig
 
     public SharedFolderSettings SharedFolders { get; set; } = new();
 
+    public string DefaultVmImportDestinationPath { get; set; } = string.Empty;
+
     public static HyperToolConfig CreateDefault() => new();
 }
 
@@ -51,6 +53,10 @@ public sealed class UiSettings
     public bool StartWithWindows { get; set; } = true;
 
     public bool OpenConsoleAfterVmStart { get; set; } = true;
+
+    public bool RestoreNumLockAfterVmStart { get; set; }
+
+    public int NumLockWatcherIntervalSeconds { get; set; } = 30;
 
     public bool OpenVmConnectWithSessionEdit { get; set; }
 

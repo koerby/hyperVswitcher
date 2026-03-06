@@ -1,5 +1,48 @@
 # HyperTool Release Notes
 
+## v2.3.8
+
+### Highlights
+
+- Host-Netzprofil-Workflow ist jetzt direkt in der UI bedienbar (VM-View + Host-Network pro Adapter).
+- Netzprofil-Änderungen nutzen UAC-Elevation, damit die Funktion auch ohne als Admin gestartete App nutzbar ist.
+- Neuer optionaler NumLock-Wächter im Host, steuerbar per Checkbox, mit konfigurierbarem Hintergrund-Intervall.
+
+### Neu
+
+- Host VM-Ansicht:
+	- Sichtbarer Host-Netzprofilstatus im Footer (`Öffentlich` / `Privat` / `Domäne`).
+	- Direkter Aktionsbutton mit Gegenzustand (z. B. `Auf Privat umstellen` bei `Öffentlich`).
+	- Bei `Domäne` ist die Aktion bewusst gesperrt.
+- Host-Network Fenster:
+	- Profil-Chips pro Adapter (`Privat`/`Öffentlich`/`Domäne`) ergänzt.
+	- Direkte Profil-Umstellung pro Adapter per Aktionsbutton.
+- Config:
+	- Neue Option `ui.restoreNumLockAfterVmStart` (Checkbox in der Oberfläche).
+	- Erweiterte Option `ui.numLockWatcherIntervalSeconds` (nur Config-Datei, Default `30`).
+
+### Verbessert
+
+- Netzprofil-Fehlerhandling:
+	- Klare Meldungen für UAC-Abbruch, fehlende Rechte, Domain-Profil-Sperre und GPO-Blockierung.
+	- UI-Zustände bleiben konsistent bei fehlgeschlagenen Umschaltungen.
+- Import-Flow:
+	- Zielordner-Handling für `copy/register/restore` präzisiert.
+	- Import-Hinweise in UI und Konfiguration klarer strukturiert.
+- Snapshot-Flow:
+	- `Create` per Dialog (Name/Beschreibung).
+	- `Restore/Delete` mit Bestätigungsdialogen.
+
+### Behoben
+
+- Host USB-UI: robustere Selection-Synchronisierung gegen Index/State-Race in WinRT-ListView-Brücken.
+- Troll-Overlay Host/Guest: Shake/Wobble/Warp wiederhergestellt und Reset/Centering stabilisiert.
+- Update-Sicherheit: Konfigurationsdateien werden bei Updates nicht mehr unbeabsichtigt überschrieben (Host/Guest Installer + Laufzeitpfade).
+
+### Doku
+
+- README auf `v2.3.8` aktualisiert.
+
 ## v2.3.7
 
 ### Highlights

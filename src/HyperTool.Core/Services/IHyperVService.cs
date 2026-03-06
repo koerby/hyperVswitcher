@@ -26,6 +26,10 @@ public interface IHyperVService
 
     Task RenameVmNetworkAdapterAsync(string vmName, string adapterName, string newAdapterName, CancellationToken cancellationToken);
 
+    Task<string> GetHostNetworkProfileCategoryAsync(CancellationToken cancellationToken);
+
+    Task SetHostNetworkProfileCategoryAsync(string adapterName, string networkCategory, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<HostNetworkAdapterInfo>> GetHostNetworkAdaptersWithUplinkAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<HyperVCheckpointInfo>> GetCheckpointsAsync(string vmName, CancellationToken cancellationToken);

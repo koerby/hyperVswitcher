@@ -14,6 +14,8 @@ public sealed class HostNetworkAdapterInfo
 
     public string DnsServers { get; set; } = string.Empty;
 
+    public string NetworkProfileCategory { get; set; } = string.Empty;
+
     public bool HasGateway => !string.IsNullOrWhiteSpace(Gateway);
 
     public bool IsDefaultSwitch { get; set; }

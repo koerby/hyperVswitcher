@@ -76,7 +76,7 @@ Name: "installusbip"; Description: "{cm:UsbipInstallTask}"; GroupDescription: "{
 Name: "installwinfsp"; Description: "{cm:WinFspInstallTask}"; GroupDescription: "{cm:AdditionalTasks}"; Check: not IsWinFspInstalled
 
 [Files]
-Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs
+Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs; Excludes: "HyperTool.Guest.json,HyperTool.Guest.config.json"
 
 [Registry]
 Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\6c4eb1be-40e8-4c8b-a4d6-5b0f67d7e40f"; ValueType: string; ValueName: "ElementName"; ValueData: "HyperTool Hyper-V Socket USB Tunnel"; Flags: uninsdeletekey

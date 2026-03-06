@@ -4,7 +4,7 @@ HyperTool ist ein WinUI-3 Toolset für Hyper-V-Host und Windows-Guest mit Fokus 
 
 ## Aktueller Release-Stand
 
-- Version: **v2.3.7**
+- Version: **v2.3.8**
 - Shared Folder ist end-to-end integriert: Host-Katalog/Freigaben + Guest-Mounting über `hypertool-file`.
 - Guest nutzt `WinFsp` als zusätzliche Runtime für Shared-Folder-Mounts inkl. Runtime-Status, Installationshinweis und Quellenangabe.
 - Host und Guest enthalten konsistente Runtime-Statusanzeigen (USB/Shared Folder) mit Installations- und Neustart-Aktionen.
@@ -16,6 +16,10 @@ HyperTool ist ein WinUI-3 Toolset für Hyper-V-Host und Windows-Guest mit Fokus 
 - Header-Status wurde präzisiert: `Selected VM` zeigt den VM-State farbig und theme-sensitiv (Running/Off + Dark/Light).
 - Guest-Header verhält sich stabiler: VM-Chips sind konsistent unter dem Titel angeordnet und vermeiden Resize-Jitter.
 - Ungespeicherte Konfigurationsänderungen verhalten sich in Host und Guest konsistent beim Navigieren/Neu-Laden.
+- Host-Netzprofil wird im VM-Bereich sichtbar angezeigt und kann direkt auf `Privat`/`Öffentlich` umgestellt werden (Domäne gesperrt).
+- Host-Network zeigt pro Adapter das erkannte Netzprofil inkl. direkter Umstellung mit UAC-Elevation.
+- Snapshot-Aktionen im Host wurden auf Dialog-Flow umgestellt (Create-Prompt, Restore/Delete-Bestätigung).
+- NumLock-Wächter im Host ist per Checkbox aktivierbar und hält NumLock optional im Hintergrund aktiv (Intervall per Config).
 
 ## Projekte
 
@@ -104,17 +108,17 @@ Wenn dir HyperTool hilft und du das Projekt unterstützen möchtest:
 ### Host
 
 - build-host.bat
-- build-installer-host.bat version=2.3.7
+- build-installer-host.bat version=2.3.8
 
 ### Guest
 
 - build-guest.bat
-- build-installer-guest.bat version=2.3.7
+- build-installer-guest.bat version=2.3.8
 
 ### Komplett
 
 - build-all.bat
-- build-all.bat version=2.3.7 host guest host-installer guest-installer no-pause
+- build-all.bat version=2.3.8 host guest host-installer guest-installer no-pause
 
 Ausgaben:
 
@@ -139,6 +143,11 @@ Relevante UI-Schalter:
 - ui.MinimizeToTray bzw. Tasktray-Menü aktiv (Guest Control Center Verhalten)
 - ui.startMinimized
 - ui.theme
+- ui.restoreNumLockAfterVmStart
+
+Versteckte/erweiterte Option (nur per `HyperTool.config.json`):
+
+- ui.numLockWatcherIntervalSeconds (Default: `30`, Bereich: `5..600`)
 
 ### Shared-Folder Transport (Guest)
 

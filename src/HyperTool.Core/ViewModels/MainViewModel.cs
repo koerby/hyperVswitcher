@@ -9,6 +9,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 
 namespace HyperTool.ViewModels;
@@ -17,6 +18,9 @@ public partial class MainViewModel : ViewModelBase
 {
     private const string NotConnectedSwitchDisplay = "Nicht verbunden";
     private const int ConfigMenuIndex = 4;
+    private const int VkNumLock = 0x90;
+    private const uint KeyeventfExtendedKey = 0x0001;
+    private const uint KeyeventfKeyUp = 0x0002;
 
     [ObservableProperty]
     private string _windowTitle = "HyperTool";
@@ -94,7 +98,7 @@ public partial class MainViewModel : ViewModelBase
     private string _importVmRequestedName = string.Empty;
 
     [ObservableProperty]
-    private string _importVmRequestedFolderName = string.Empty;
+    private string _defaultVmImportDestinationPath = string.Empty;
 
     [ObservableProperty]
     private VmImportModeOption? _selectedVmImportModeOption;
@@ -133,7 +137,16 @@ public partial class MainViewModel : ViewModelBase
     private bool _uiOpenConsoleAfterVmStart = true;
 
     [ObservableProperty]
+    private bool _uiRestoreNumLockAfterVmStart;
+
+    [ObservableProperty]
     private bool _uiOpenVmConnectWithSessionEdit;
+
+    [DllImport("user32.dll")]
+    private static extern short GetKeyState(int virtualKey);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
     [ObservableProperty]
     private string _uiTheme = "Dark";
@@ -176,6 +189,12 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _networkSwitchStatusHint = string.Empty;
+
+    [ObservableProperty]
+    private string _hostNetworkProfileCategory = "Unknown";
+
+    [ObservableProperty]
+    private string _hostNetworkProfileDisplayText = "Host-Netzprofil: Unbekannt";
 
     [ObservableProperty]
     private bool _hasPendingConfigChanges;
@@ -238,9 +257,9 @@ public partial class MainViewModel : ViewModelBase
 
     public IReadOnlyList<VmImportModeOption> VmImportModeOptions { get; } =
     [
-        new() { Key = "copy", Label = "Kopieren (neue VM-ID)", Description = "Kopie am Ziel anlegen, neue VM-ID erzeugen." },
-        new() { Key = "register", Label = "Direkt registrieren", Description = "VM am aktuellen Speicherort registrieren." },
-        new() { Key = "restore", Label = "Wiederherstellen", Description = "Import ohne Kopie mit bestehender VM-ID." }
+        new() { Key = "copy", Label = "Kopieren (Quellordner + Zielordner)", Description = "Fragt Quellordner und Zielordner ab, kopiert die VM und erzeugt eine neue VM-ID." },
+        new() { Key = "register", Label = "Direkt registrieren (nur Quellordner)", Description = "Fragt nur den Quellordner ab und registriert die VM am bestehenden Speicherort." },
+        new() { Key = "restore", Label = "Wiederherstellen (nur Quellordner)", Description = "Fragt nur den Quellordner ab und importiert ohne Kopie mit bestehender VM-ID." }
     ];
 
     public string DefaultSwitchName { get; }
@@ -407,6 +426,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly SemaphoreSlim _usbTrayRefreshGate = new(1, 1);
     private readonly HashSet<string> _usbAutoShareDeviceKeys = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HttpClient UpdateDownloadClient = new();
+    private int _uiNumLockWatcherIntervalSeconds = 30;
 
     public event EventHandler? TrayStateChanged;
 
@@ -450,6 +470,8 @@ public partial class MainViewModel : ViewModelBase
         UiStartMinimized = configResult.Config.Ui.StartMinimized;
         UiStartWithWindows = configResult.Config.Ui.StartWithWindows;
         UiOpenConsoleAfterVmStart = configResult.Config.Ui.OpenConsoleAfterVmStart;
+        UiRestoreNumLockAfterVmStart = configResult.Config.Ui.RestoreNumLockAfterVmStart;
+        _uiNumLockWatcherIntervalSeconds = Math.Clamp(configResult.Config.Ui.NumLockWatcherIntervalSeconds, 5, 600);
         UiOpenVmConnectWithSessionEdit = configResult.Config.Ui.OpenVmConnectWithSessionEdit;
         UiTheme = NormalizeUiTheme(configResult.Config.Ui.Theme);
         UpdateCheckOnStartup = configResult.Config.Update.CheckOnStartup;
@@ -459,6 +481,7 @@ public partial class MainViewModel : ViewModelBase
         UsbAutoDetachOnClientDisconnect = configResult.Config.Usb.AutoDetachOnClientDisconnect;
         UsbUnshareOnExit = configResult.Config.Usb.UnshareOnExit;
         HostSharedFoldersEnabled = configResult.Config.SharedFolders.Enabled;
+        DefaultVmImportDestinationPath = configResult.Config.DefaultVmImportDestinationPath?.Trim() ?? string.Empty;
         _usbAutoShareDeviceKeys.Clear();
         foreach (var key in configResult.Config.Usb.AutoShareDeviceKeys)
         {
@@ -550,6 +573,7 @@ public partial class MainViewModel : ViewModelBase
         _lastSelectedMenuIndex = SelectedMenuIndex;
 
         _ = InitializeAsync();
+        _ = RunNumLockWatcherAsync();
     }
 
     partial void OnIsLogExpandedChanged(bool value)
@@ -673,7 +697,21 @@ public partial class MainViewModel : ViewModelBase
 
     partial void OnUiOpenConsoleAfterVmStartChanged(bool value) => MarkConfigDirty();
 
+    partial void OnUiRestoreNumLockAfterVmStartChanged(bool value) => MarkConfigDirty();
+
     partial void OnUiOpenVmConnectWithSessionEditChanged(bool value) => MarkConfigDirty();
+
+    partial void OnDefaultVmImportDestinationPathChanged(string value)
+    {
+        var normalized = value?.Trim() ?? string.Empty;
+        if (!string.Equals(value, normalized, StringComparison.Ordinal))
+        {
+            DefaultVmImportDestinationPath = normalized;
+            return;
+        }
+
+        MarkConfigDirty();
+    }
 
     partial void OnUiThemeChanged(string value)
     {
@@ -1094,6 +1132,7 @@ public partial class MainViewModel : ViewModelBase
         await RefreshUsbRuntimeAvailabilityAsync();
         await LoadVmsFromHyperVWithRetryAsync();
         await RefreshSwitchesAsync();
+        await RefreshHostNetworkProfileAsync();
         await RefreshVmStatusAsync();
         await LoadCheckpointsAsync();
 
@@ -1394,44 +1433,65 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task ImportVmAsync()
     {
-        var importPath = PickFolderPath("Ordner mit exportierter Hyper-V VM auswählen");
+        var importPath = PickFolderPath("Schritt 1/2: Ordner der zu importierenden Hyper-V VM auswählen");
         if (string.IsNullOrWhiteSpace(importPath))
         {
             AddNotification("VM-Import abgebrochen.", "Info");
             return;
         }
 
-        var destinationPath = PickFolderPath("Zielordner für die neue importierte VM auswählen");
-        if (string.IsNullOrWhiteSpace(destinationPath))
+        try
+        {
+            var hasVmConfig = Directory.EnumerateFiles(importPath, "*.vmcx", SearchOption.AllDirectories).Any()
+                              || Directory.EnumerateFiles(importPath, "*.xml", SearchOption.AllDirectories).Any();
+
+            if (!hasVmConfig)
+            {
+                AddNotification("Im gewählten Quellordner wurde keine Hyper-V Konfigurationsdatei (.vmcx/.xml) gefunden.", "Error");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            AddNotification($"Quellordner konnte nicht geprüft werden: {ex.Message}", "Error");
+            return;
+        }
+
+        var importMode = (SelectedVmImportModeOption?.Key ?? "copy").Trim().ToLowerInvariant();
+        var isCopyMode = string.Equals(importMode, "copy", StringComparison.OrdinalIgnoreCase);
+        var destinationPath = (DefaultVmImportDestinationPath ?? string.Empty).Trim();
+
+        if (isCopyMode && string.IsNullOrWhiteSpace(destinationPath))
+        {
+            destinationPath = PickFolderPath("Schritt 2/2: Zielordner für den VM-Import (Kopieren) auswählen")?.Trim() ?? string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(destinationPath))
+            {
+                DefaultVmImportDestinationPath = destinationPath;
+                AddNotification("Import-Zielordner für künftige VM-Imports gesetzt.", "Info");
+            }
+        }
+
+        if (isCopyMode && string.IsNullOrWhiteSpace(destinationPath))
         {
             AddNotification("VM-Import abgebrochen (kein Zielordner ausgewählt).", "Info");
             return;
         }
 
-        var hasReliableProgress = false;
         var progress = new Progress<int>(percent =>
         {
             var clampedPercent = Math.Clamp(percent, 0, 100);
 
-            if (!hasReliableProgress)
-            {
-                if (clampedPercent < 2)
-                {
-                    BusyProgressPercent = -1;
-                    BusyText = "VM wird importiert... (Fortschritt wird von Hyper-V ermittelt)";
-                    return;
-                }
-
-                hasReliableProgress = true;
-            }
-
-            BusyProgressPercent = clampedPercent;
-            BusyText = $"VM wird importiert... {clampedPercent}%";
+            BusyProgressPercent = -1;
+            BusyText = clampedPercent >= 100
+                ? "VM-Import wird abgeschlossen..."
+                : "VM wird importiert... (Fortschritt wird von Hyper-V ermittelt)";
         });
 
-        var importMode = (SelectedVmImportModeOption?.Key ?? "copy").Trim();
         var requestedVmName = string.IsNullOrWhiteSpace(ImportVmRequestedName) ? null : ImportVmRequestedName.Trim();
-        var requestedFolderName = string.IsNullOrWhiteSpace(ImportVmRequestedFolderName) ? null : ImportVmRequestedFolderName.Trim();
+        var requestedFolderName = requestedVmName;
+
+        AddNotification($"VM-Import gestartet · Modus: {SelectedVmImportModeOption?.Label ?? importMode}", "Info");
 
         await ExecuteBusyActionAsync("VM wird importiert...", async token =>
         {
@@ -1449,7 +1509,7 @@ public partial class MainViewModel : ViewModelBase
 
             var modeLabel = SelectedVmImportModeOption?.Label ?? importResult.ImportMode;
             var destinationInfo = string.IsNullOrWhiteSpace(importResult.DestinationFolderPath)
-                ? destinationPath
+                ? (isCopyMode ? destinationPath : "aktueller Speicherort (keine Kopie)")
                 : importResult.DestinationFolderPath;
 
             AddNotification($"VM '{importResult.VmName}' importiert ({modeLabel}) · Ziel: {destinationInfo}", "Success");
@@ -1491,7 +1551,54 @@ public partial class MainViewModel : ViewModelBase
     {
         await LoadVmsFromHyperVWithRetryAsync();
         await RefreshSwitchesAsync();
+        await RefreshHostNetworkProfileAsync();
         await RefreshVmStatusAsync();
+    }
+
+    private async Task RefreshHostNetworkProfileAsync()
+    {
+        try
+        {
+            var profileCategory = await _hyperVService.GetHostNetworkProfileCategoryAsync(_lifetimeCancellation.Token);
+            ApplyHostNetworkProfileCategory(profileCategory);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Host-Netzprofil konnte nicht ermittelt werden.");
+            ApplyHostNetworkProfileCategory("Unknown");
+        }
+    }
+
+    private void ApplyHostNetworkProfileCategory(string? category)
+    {
+        HostNetworkProfileCategory = NormalizeHostNetworkProfileCategory(category);
+
+        HostNetworkProfileDisplayText = HostNetworkProfileCategory switch
+        {
+            "Public" => "Host-Netzprofil: Öffentlich (Default Switch oft problematisch)",
+            "DomainAuthenticated" => "Host-Netzprofil: Domäne",
+            "Private" => "Host-Netzprofil: Privat",
+            _ => "Host-Netzprofil: Unbekannt"
+        };
+    }
+
+    private static string NormalizeHostNetworkProfileCategory(string? category)
+    {
+        if (string.IsNullOrWhiteSpace(category))
+        {
+            return "Unknown";
+        }
+
+        return category.Trim() switch
+        {
+            "Public" => "Public",
+            "Private" => "Private",
+            "DomainAuthenticated" => "DomainAuthenticated",
+            _ => "Unknown"
+        };
     }
 
     private async Task RefreshUsbDevicesAsync()
@@ -2695,6 +2802,8 @@ public partial class MainViewModel : ViewModelBase
                     EnableTrayMenu = UiEnableTrayMenu,
                     StartWithWindows = UiStartWithWindows,
                     OpenConsoleAfterVmStart = UiOpenConsoleAfterVmStart,
+                    RestoreNumLockAfterVmStart = UiRestoreNumLockAfterVmStart,
+                    NumLockWatcherIntervalSeconds = Math.Clamp(_uiNumLockWatcherIntervalSeconds, 5, 600),
                     OpenVmConnectWithSessionEdit = UiOpenVmConnectWithSessionEdit,
                     TrayVmNames = [.. _trayVmNames]
                 },
@@ -2721,7 +2830,8 @@ public partial class MainViewModel : ViewModelBase
                         .OrderBy(folder => folder.Label, StringComparer.OrdinalIgnoreCase)
                         .ThenBy(folder => folder.ShareName, StringComparer.OrdinalIgnoreCase)
                         .ToList()
-                }
+                },
+                DefaultVmImportDestinationPath = DefaultVmImportDestinationPath.Trim()
             };
 
             if (_configService.TrySave(_configPath, config, out var errorMessage))
@@ -3290,6 +3400,45 @@ public partial class MainViewModel : ViewModelBase
         return adapters;
     }
 
+    public async Task<bool> SetHostNetworkProfileCategoryAsync(string? adapterName, string category)
+    {
+        if (string.IsNullOrWhiteSpace(category))
+        {
+            AddNotification("Netzprofil konnte nicht gesetzt werden: Kategorie fehlt.", "Warning");
+            return false;
+        }
+
+        var normalizedCategory = category.Trim() switch
+        {
+            "Private" => "Private",
+            "Public" => "Public",
+            _ => string.Empty
+        };
+
+        if (string.IsNullOrWhiteSpace(normalizedCategory))
+        {
+            AddNotification("Netzprofil konnte nicht gesetzt werden: nur Private oder Public sind erlaubt.", "Warning");
+            return false;
+        }
+
+        var updated = false;
+        await ExecuteBusyActionAsync("Host-Netzprofil wird geändert...", async token =>
+        {
+            await _hyperVService.SetHostNetworkProfileCategoryAsync(adapterName ?? string.Empty, normalizedCategory, token);
+            await RefreshHostNetworkProfileAsync();
+
+            var targetText = string.IsNullOrWhiteSpace(adapterName)
+                ? "aktive Host-Netzprofile"
+                : $"Netzprofil von '{adapterName}'";
+
+            var categoryText = normalizedCategory == "Private" ? "Privat" : "Öffentlich";
+            AddNotification($"{targetText} auf '{categoryText}' gesetzt.", "Success");
+            updated = true;
+        }, showNotificationOnErrorOnly: true);
+
+        return updated;
+    }
+
     private async Task RefreshVmStatusByNameAsync(string vmName)
     {
         var currentSelectedVm = SelectedVm;
@@ -3338,6 +3487,8 @@ public partial class MainViewModel : ViewModelBase
                 UiStartMinimized = config.Ui.StartMinimized;
                 UiStartWithWindows = config.Ui.StartWithWindows;
                 UiOpenConsoleAfterVmStart = config.Ui.OpenConsoleAfterVmStart;
+                UiRestoreNumLockAfterVmStart = config.Ui.RestoreNumLockAfterVmStart;
+                _uiNumLockWatcherIntervalSeconds = Math.Clamp(config.Ui.NumLockWatcherIntervalSeconds, 5, 600);
                 UiOpenVmConnectWithSessionEdit = config.Ui.OpenVmConnectWithSessionEdit;
                 UiTheme = NormalizeUiTheme(config.Ui.Theme);
                 ApplyConfiguredVmDefinitions(config.Vms);
@@ -3345,6 +3496,7 @@ public partial class MainViewModel : ViewModelBase
                 UpdateCheckOnStartup = config.Update.CheckOnStartup;
                 GithubOwner = config.Update.GitHubOwner;
                 GithubRepo = config.Update.GitHubRepo;
+                DefaultVmImportDestinationPath = config.DefaultVmImportDestinationPath?.Trim() ?? string.Empty;
                 _usbAutoShareDeviceKeys.Clear();
                 foreach (var key in config.Usb.AutoShareDeviceKeys)
                 {
@@ -3798,6 +3950,52 @@ public partial class MainViewModel : ViewModelBase
         await RefreshVmStatusByNameAsync(vmName);
     }
 
+    private async Task RunNumLockWatcherAsync()
+    {
+        var token = _lifetimeCancellation.Token;
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                if (UiRestoreNumLockAfterVmStart && !IsNumLockEnabled())
+                {
+                    ToggleNumLockKey();
+                }
+
+                var intervalSeconds = Math.Clamp(_uiNumLockWatcherIntervalSeconds, 5, 600);
+                await Task.Delay(TimeSpan.FromSeconds(intervalSeconds), token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "NumLock watcher iteration failed.");
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), token);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    private static bool IsNumLockEnabled()
+    {
+        return (GetKeyState(VkNumLock) & 0x1) != 0;
+    }
+
+    private static void ToggleNumLockKey()
+    {
+        keybd_event((byte)VkNumLock, 0x45, KeyeventfExtendedKey, UIntPtr.Zero);
+        keybd_event((byte)VkNumLock, 0x45, KeyeventfExtendedKey | KeyeventfKeyUp, UIntPtr.Zero);
+    }
+
     private async Task StopVmByNameAsync(string? vmName)
     {
         if (string.IsNullOrWhiteSpace(vmName))
@@ -3929,6 +4127,18 @@ public partial class MainViewModel : ViewModelBase
         {
             AddNotification("Kein Installer-Download verfügbar.", "Warning");
             return;
+        }
+
+        if (HasPendingConfigChanges)
+        {
+            AddNotification("Ungespeicherte Einstellungen werden vor dem Update gespeichert...", "Info");
+            await SaveConfigAsync();
+
+            if (HasPendingConfigChanges)
+            {
+                AddNotification("Update abgebrochen: Konfiguration konnte nicht sicher gespeichert werden.", "Error");
+                return;
+            }
         }
 
         await ExecuteBusyActionAsync("Update wird heruntergeladen...", async token =>

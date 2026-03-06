@@ -77,7 +77,8 @@ Name: "desktopicon"; Description: "{cm:DesktopIconTask}"; GroupDescription: "{cm
 Name: "installusbipd"; Description: "{cm:UsbipdInstallTask}"; GroupDescription: "{cm:AdditionalTasks}"; Flags: checkedonce; Check: not IsUsbipdInstalled
 
 [Files]
-Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs; Excludes: "Scripts\HyperToolCredentialProvisioning.ps1,tools\*Credential*.ps1"
+Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs; Excludes: "HyperTool.config.json,Scripts\HyperToolCredentialProvisioning.ps1,tools\*Credential*.ps1"
+Source: "{#MySourceDir}\HyperTool.config.json"; DestDir: "{app}"; Flags: onlyifdoesntexist ignoreversion uninsneveruninstall
 
 [Registry]
 Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\6c4eb1be-40e8-4c8b-a4d6-5b0f67d7e40f"; ValueType: string; ValueName: "ElementName"; ValueData: "HyperTool Hyper-V Socket USB Tunnel"; Flags: uninsdeletekey

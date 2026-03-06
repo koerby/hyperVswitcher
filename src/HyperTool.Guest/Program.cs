@@ -10,6 +10,7 @@ internal static class GuestCli
         _winFspMountService ??= new GuestWinFspMountService();
 
         var configPath = ResolveConfigPath(args);
+        GuestConfigService.TryMigrateLegacyConfig(configPath);
         var command = ResolveCommand(args);
 
         GuestConfig config;

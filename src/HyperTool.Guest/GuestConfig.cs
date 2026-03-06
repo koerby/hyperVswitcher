@@ -220,6 +220,45 @@ internal static class GuestConfigService
         "HyperTool",
         "HyperTool.Guest.handshake.json");
 
+    public static void TryMigrateLegacyConfig(string targetConfigPath)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(targetConfigPath) || File.Exists(targetConfigPath))
+            {
+                return;
+            }
+
+            var legacyCandidates = new[]
+            {
+                Path.Combine(AppContext.BaseDirectory, "HyperTool.Guest.json"),
+                Path.Combine(AppContext.BaseDirectory, "HyperTool.Guest.config.json")
+            };
+
+            var legacyPath = legacyCandidates.FirstOrDefault(path => File.Exists(path));
+            if (string.IsNullOrWhiteSpace(legacyPath))
+            {
+                return;
+            }
+
+            if (string.Equals(legacyPath, targetConfigPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var targetDirectory = Path.GetDirectoryName(targetConfigPath);
+            if (!string.IsNullOrWhiteSpace(targetDirectory))
+            {
+                Directory.CreateDirectory(targetDirectory);
+            }
+
+            File.Copy(legacyPath, targetConfigPath, overwrite: false);
+        }
+        catch
+        {
+        }
+    }
+
     public static GuestConfig LoadOrCreate(string configPath, out bool created)
     {
         if (!File.Exists(configPath))

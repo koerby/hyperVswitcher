@@ -41,6 +41,9 @@ public sealed class MainWindow : Window
     private const string HostUsbRuntimeOwner = "dorssel";
     private const string HostUsbRuntimeRepo = "usbipd-win";
     private const string HostUsbRuntimeAssetHint = "x64";
+    private const string GuestRuntimeOwner = "koerby";
+    private const string GuestRuntimeRepo = "HyperTool";
+    private const string GuestRuntimeAssetHint = "HyperTool-Guest-Setup";
     private const string GuestSingleInstancePipeName = "HyperTool.Guest.SingleInstance.Activate";
     private static readonly HttpClient RuntimeInstallerDownloadClient = new();
 
@@ -79,6 +82,8 @@ public sealed class MainWindow : Window
     private readonly ListView _sharedFoldersListView = new();
     private readonly Ellipse _sharedFolderFileServiceStatusDot = new() { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _sharedFolderFileServiceStatusText = new() { Opacity = 0.9, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Ellipse _hostNetworkProfileStatusDot = new() { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _hostNetworkProfileStatusText = new() { Opacity = 0.9, VerticalAlignment = VerticalAlignment.Center, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private readonly TextBlock _selectedVmStateText = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBox _sharedFolderPathTextBox = new();
     private readonly TextBox _sharedFolderShareNameTextBox = new();
@@ -114,10 +119,15 @@ public sealed class MainWindow : Window
     private Button? _usbRefreshButton;
     private Button? _usbShareButton;
     private Button? _usbUnshareButton;
+    private Button? _vmHostNetworkProfileActionButton;
     private readonly StackPanel _vmAdapterCardsPanel = new() { Spacing = 10 };
     private readonly Dictionary<string, TreeViewNode> _checkpointNodesById = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<TreeViewNode, HyperVCheckpointTreeItem> _checkpointItemsByNode = [];
     private bool _isUpdatingCheckpointTreeSelection;
+    private Button? _snapshotCreateButton;
+    private Button? _snapshotRestoreButton;
+    private Button? _snapshotDeleteButton;
+    private Button? _snapshotRefreshButton;
     private readonly RotateTransform _logoRotateTransform = new();
     private UIElement? _vmPage;
     private UIElement? _snapshotsPage;
@@ -1576,6 +1586,7 @@ public sealed class MainWindow : Window
         _vmPage = BuildVmPage();
         _infoPage = BuildInfoPage();
         UpdateSelectedVmStateTextStyle();
+        UpdateHostNetworkProfileStatusUi();
         UpdatePageContent();
         Grid.SetRow(_pageContent, 2);
         contentGrid.Children.Add(_pageContent);
@@ -1718,7 +1729,9 @@ public sealed class MainWindow : Window
         actionRow2.Children.Add(CreateIconButton("🛠", "Konsole neu aufbauen", _viewModel.ReopenConsoleWithSessionEditCommand));
         actionRow2.Children.Add(CreateIconButton("⟳", "Refresh", _viewModel.RefreshVmStatusCommand));
         actionRow2.Children.Add(CreateIconButton("💾", "Export", _viewModel.ExportSelectedVmCommand));
-        actionRow2.Children.Add(CreateIconButton("📥", "Import", _viewModel.ImportVmCommand));
+        var quickImportButton = CreateIconButton("📥", "Import", _viewModel.ImportVmCommand);
+        ToolTipService.SetToolTip(quickImportButton, "Import: 1) VM-Quellordner wählen. 2) Nur im Kopiermodus ggf. Zielordner verwenden.");
+        actionRow2.Children.Add(quickImportButton);
         actionStack.Children.Add(actionRow2);
 
         actionCard.Child = actionStack;
@@ -1765,9 +1778,53 @@ public sealed class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Center
         };
         footerRow.Children.Add(hostText);
+
+        var footerRightStack = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 12,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        _hostNetworkProfileStatusText.SetBinding(
+            TextBlock.TextProperty,
+            new Binding { Source = _viewModel, Path = new PropertyPath(nameof(MainViewModel.HostNetworkProfileDisplayText)) });
+
+        var hostProfileStatusStack = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        hostProfileStatusStack.Children.Add(_hostNetworkProfileStatusDot);
+        hostProfileStatusStack.Children.Add(_hostNetworkProfileStatusText);
+        footerRightStack.Children.Add(hostProfileStatusStack);
+
+        var vmProfileChangeStack = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        _vmHostNetworkProfileActionButton = new Button
+        {
+            Content = "Auf Öffentlich umstellen",
+            CornerRadius = new CornerRadius(8),
+            BorderThickness = new Thickness(1),
+            BorderBrush = Application.Current.Resources["PanelBorderBrush"] as Brush,
+            Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
+            MinWidth = 160,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        _vmHostNetworkProfileActionButton.Click += async (_, _) => await ApplyVmFooterHostNetworkProfileAsync();
+        vmProfileChangeStack.Children.Add(_vmHostNetworkProfileActionButton);
+        footerRightStack.Children.Add(vmProfileChangeStack);
+
         var hostButtonBottom = CreateIconButton("🌐", "Host Network", onClick: async (_, _) => await OpenHostNetworkWindowAsync(), compact: true);
-        Grid.SetColumn(hostButtonBottom, 1);
-        footerRow.Children.Add(hostButtonBottom);
+        footerRightStack.Children.Add(hostButtonBottom);
+
+        Grid.SetColumn(footerRightStack, 1);
+        footerRow.Children.Add(footerRightStack);
         networkStack.Children.Add(footerRow);
 
         networkSection.Child = networkStack;
@@ -1781,7 +1838,6 @@ public sealed class MainWindow : Window
     {
         var panel = new Grid { RowSpacing = 10 };
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var listBorder = new Border
@@ -1817,63 +1873,179 @@ public sealed class MainWindow : Window
         listBorder.Child = _checkpointTreeView;
         panel.Children.Add(listBorder);
 
-        var createGrid = new Grid { ColumnSpacing = 8 };
-        createGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(130) });
-        createGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        createGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        createGrid.Children.Add(new TextBlock { Text = "Checkpoint Name", VerticalAlignment = VerticalAlignment.Center, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        var actionWrap = new StackPanel { Spacing = 8 };
 
-        var checkpointNameBox = new TextBox { Text = _viewModel.NewCheckpointName, PlaceholderText = "Checkpoint Name", CornerRadius = new CornerRadius(8) };
-        checkpointNameBox.TextChanged += (_, _) => _viewModel.NewCheckpointName = checkpointNameBox.Text;
-        Grid.SetColumn(checkpointNameBox, 1);
-        createGrid.Children.Add(checkpointNameBox);
+        var actionRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        _snapshotCreateButton = CreateIconButton("📸", "Create", onClick: async (_, _) => await CreateCheckpointWithPromptAsync());
+        _snapshotRestoreButton = CreateIconButton("✅", "Restore", onClick: async (_, _) => await RestoreCheckpointWithConfirmationAsync());
+        _snapshotDeleteButton = CreateIconButton("🗑", "Delete", onClick: async (_, _) => await DeleteCheckpointWithConfirmationAsync());
+        _snapshotRefreshButton = CreateIconButton("⟳", "Refresh", _viewModel.LoadCheckpointsCommand);
 
-        var createButton = CreateIconButton("📸", "Create");
-        createButton.Click += (_, _) =>
-        {
-            if (string.IsNullOrWhiteSpace(_viewModel.NewCheckpointName))
-            {
-                _viewModel.NewCheckpointName = $"Checkpoint {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
-            }
+        actionRow.Children.Add(_snapshotCreateButton);
+        actionRow.Children.Add(_snapshotRestoreButton);
+        actionRow.Children.Add(_snapshotDeleteButton);
+        actionRow.Children.Add(_snapshotRefreshButton);
 
-            if (_viewModel.CreateCheckpointCommand.CanExecute(null))
-            {
-                _viewModel.CreateCheckpointCommand.Execute(null);
-            }
-        };
-        Grid.SetColumn(createButton, 2);
-        createGrid.Children.Add(createButton);
-        Grid.SetRow(createGrid, 1);
-        panel.Children.Add(createGrid);
-
-        var actionGrid = new Grid { ColumnSpacing = 8 };
-        actionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(130) });
-        actionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        actionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        actionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        actionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        actionGrid.Children.Add(new TextBlock { Text = "Beschreibung", VerticalAlignment = VerticalAlignment.Center, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        var checkpointDescriptionBox = new TextBox { Text = _viewModel.NewCheckpointDescription, PlaceholderText = "Beschreibung", CornerRadius = new CornerRadius(8) };
-        checkpointDescriptionBox.TextChanged += (_, _) => _viewModel.NewCheckpointDescription = checkpointDescriptionBox.Text;
-        Grid.SetColumn(checkpointDescriptionBox, 1);
-        actionGrid.Children.Add(checkpointDescriptionBox);
-
-        var restoreButton = CreateIconButton("✅", "Restore", _viewModel.ApplyCheckpointCommand);
-        Grid.SetColumn(restoreButton, 2);
-        actionGrid.Children.Add(restoreButton);
-
-        var deleteButton = CreateIconButton("🗑", "Delete", _viewModel.DeleteCheckpointCommand);
-        Grid.SetColumn(deleteButton, 3);
-        actionGrid.Children.Add(deleteButton);
-
-        var refreshButton = CreateIconButton("⟳", "Refresh", _viewModel.LoadCheckpointsCommand);
-        Grid.SetColumn(refreshButton, 4);
-        actionGrid.Children.Add(refreshButton);
-
-        Grid.SetRow(actionGrid, 2);
-        panel.Children.Add(actionGrid);
+        actionWrap.Children.Add(actionRow);
+        Grid.SetRow(actionWrap, 1);
+        panel.Children.Add(actionWrap);
+        UpdateSnapshotActionButtonsState();
         return panel;
+    }
+
+    private async Task CreateCheckpointWithPromptAsync()
+    {
+        if (!_viewModel.CreateCheckpointCommand.CanExecute(null))
+        {
+            return;
+        }
+
+        var xamlRoot = TryGetDialogXamlRoot();
+        if (xamlRoot is null)
+        {
+            return;
+        }
+
+        var nameBox = new TextBox
+        {
+            PlaceholderText = "Checkpoint Name",
+            Text = $"Checkpoint {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
+            CornerRadius = new CornerRadius(8)
+        };
+
+        var descriptionBox = new TextBox
+        {
+            PlaceholderText = "Beschreibung (optional)",
+            Text = string.Empty,
+            CornerRadius = new CornerRadius(8)
+        };
+
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(new TextBlock
+        {
+            Text = "Neuen Checkpoint erstellen",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+        });
+        content.Children.Add(nameBox);
+        content.Children.Add(descriptionBox);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = xamlRoot,
+            Title = "Checkpoint erstellen",
+            Content = content,
+            PrimaryButtonText = "Erstellen",
+            CloseButtonText = "Abbrechen",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        _viewModel.NewCheckpointName = (nameBox.Text ?? string.Empty).Trim();
+        _viewModel.NewCheckpointDescription = (descriptionBox.Text ?? string.Empty).Trim();
+
+        await _viewModel.CreateCheckpointCommand.ExecuteAsync(null);
+        UpdateSnapshotActionButtonsState();
+    }
+
+    private async Task RestoreCheckpointWithConfirmationAsync()
+    {
+        if (!_viewModel.ApplyCheckpointCommand.CanExecute(null)
+            || _viewModel.SelectedVm is null
+            || _viewModel.SelectedCheckpoint is null)
+        {
+            return;
+        }
+
+        var xamlRoot = TryGetDialogXamlRoot();
+        if (xamlRoot is null)
+        {
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = xamlRoot,
+            Title = "Checkpoint wiederherstellen",
+            Content = $"Wirklich Checkpoint '{_viewModel.SelectedCheckpoint.Name}' auf VM '{_viewModel.SelectedVm.Name}' wiederherstellen?",
+            PrimaryButtonText = "Ja, wiederherstellen",
+            CloseButtonText = "Abbrechen",
+            DefaultButton = ContentDialogButton.Close
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result == ContentDialogResult.Primary)
+        {
+            await _viewModel.ApplyCheckpointCommand.ExecuteAsync(null);
+        }
+
+        UpdateSnapshotActionButtonsState();
+    }
+
+    private async Task DeleteCheckpointWithConfirmationAsync()
+    {
+        if (!_viewModel.DeleteCheckpointCommand.CanExecute(null)
+            || _viewModel.SelectedVm is null
+            || _viewModel.SelectedCheckpoint is null)
+        {
+            return;
+        }
+
+        var xamlRoot = TryGetDialogXamlRoot();
+        if (xamlRoot is null)
+        {
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = xamlRoot,
+            Title = "Checkpoint löschen",
+            Content = $"Wirklich Checkpoint '{_viewModel.SelectedCheckpoint.Name}' von VM '{_viewModel.SelectedVm.Name}' löschen?",
+            PrimaryButtonText = "Ja, löschen",
+            CloseButtonText = "Abbrechen",
+            DefaultButton = ContentDialogButton.Close
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result == ContentDialogResult.Primary)
+        {
+            await _viewModel.DeleteCheckpointCommand.ExecuteAsync(null);
+        }
+
+        UpdateSnapshotActionButtonsState();
+    }
+
+    private XamlRoot? TryGetDialogXamlRoot()
+    {
+        return Content is FrameworkElement root ? root.XamlRoot : null;
+    }
+
+    private void UpdateSnapshotActionButtonsState()
+    {
+        if (_snapshotCreateButton is not null)
+        {
+            _snapshotCreateButton.IsEnabled = _viewModel.CreateCheckpointCommand.CanExecute(null);
+        }
+
+        if (_snapshotRestoreButton is not null)
+        {
+            _snapshotRestoreButton.IsEnabled = _viewModel.ApplyCheckpointCommand.CanExecute(null);
+        }
+
+        if (_snapshotDeleteButton is not null)
+        {
+            _snapshotDeleteButton.IsEnabled = _viewModel.DeleteCheckpointCommand.CanExecute(null);
+        }
+
+        if (_snapshotRefreshButton is not null)
+        {
+            _snapshotRefreshButton.IsEnabled = _viewModel.LoadCheckpointsCommand.CanExecute(null);
+        }
     }
 
     private UIElement BuildConfigPage()
@@ -2046,6 +2218,13 @@ public sealed class MainWindow : Window
             Opacity = 0.95,
             Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
         });
+        importOptionsStack.Children.Add(new TextBlock
+        {
+            Text = "Ablauf: Immer zuerst den Export-Ordner der VM wählen. Bei 'Kopieren' wird danach der feste Zielordner aus der Konfiguration verwendet.",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.85,
+            Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
+        });
 
         var importModeGrid = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
         importModeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
@@ -2066,6 +2245,24 @@ public sealed class MainWindow : Window
         importModeGrid.Children.Add(importModeCombo);
         importOptionsStack.Children.Add(importModeGrid);
 
+        var importModeHintText = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.85,
+            Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
+        };
+
+        void UpdateImportModeHint()
+        {
+            var selectedMode = importModeCombo.SelectedItem as VmImportModeOption;
+            importModeHintText.Text = selectedMode?.Description
+                ?? "Importmodus wählen: Register/Restore brauchen nur den Quellordner, Kopieren zusätzlich den Zielordner.";
+        }
+
+        importModeCombo.SelectionChanged += (_, _) => UpdateImportModeHint();
+        UpdateImportModeHint();
+        importOptionsStack.Children.Add(importModeHintText);
+
         var importNameGrid = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
         importNameGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
         importNameGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -2081,20 +2278,34 @@ public sealed class MainWindow : Window
         importNameGrid.Children.Add(importVmNameTextBox);
         importOptionsStack.Children.Add(importNameGrid);
 
-        var importFolderGrid = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        importFolderGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
-        importFolderGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        importFolderGrid.Children.Add(new TextBlock
+        var importDestinationGrid = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        importDestinationGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
+        importDestinationGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        importDestinationGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        importDestinationGrid.Children.Add(new TextBlock
         {
-            Text = "Ordnername (optional)",
+            Text = "Import-Zielordner",
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
         });
-        var importFolderNameTextBox = CreateStyledTextBox(_viewModel.ImportVmRequestedFolderName, "z. B. Dev-VM-Import");
-        importFolderNameTextBox.TextChanged += (_, _) => _viewModel.ImportVmRequestedFolderName = importFolderNameTextBox.Text;
-        Grid.SetColumn(importFolderNameTextBox, 1);
-        importFolderGrid.Children.Add(importFolderNameTextBox);
-        importOptionsStack.Children.Add(importFolderGrid);
+        var importDestinationTextBox = CreateStyledTextBox(_viewModel.DefaultVmImportDestinationPath, @"z. B. D:\HyperV\Imports");
+        importDestinationTextBox.TextChanged += (_, _) => _viewModel.DefaultVmImportDestinationPath = importDestinationTextBox.Text;
+        Grid.SetColumn(importDestinationTextBox, 1);
+        importDestinationGrid.Children.Add(importDestinationTextBox);
+        var importDestinationBrowseButton = CreateIconButton("📁", "Ordner wählen", onClick: (_, _) =>
+        {
+            var folderPath = new UiInteropService().PickFolderPath("Standard-Zielordner für VM-Import auswählen");
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                return;
+            }
+
+            importDestinationTextBox.Text = folderPath;
+            _viewModel.DefaultVmImportDestinationPath = folderPath;
+        });
+        Grid.SetColumn(importDestinationBrowseButton, 2);
+        importDestinationGrid.Children.Add(importDestinationBrowseButton);
+        importOptionsStack.Children.Add(importDestinationGrid);
 
         importOptionsCard.Child = importOptionsStack;
         vmStack.Children.Add(importOptionsCard);
@@ -2103,6 +2314,7 @@ public sealed class MainWindow : Window
         vmButtonsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var importButton = CreateIconButton("📥", "VM importieren", _viewModel.ImportVmCommand);
         importButton.HorizontalAlignment = HorizontalAlignment.Stretch;
+        ToolTipService.SetToolTip(importButton, "Ablauf: 1) Quellordner der VM auswählen. 2) Nur bei 'Kopieren' wird ein Zielordner genutzt.");
         vmButtonsGrid.Children.Add(importButton);
 
         vmStack.Children.Add(vmButtonsGrid);
@@ -2125,6 +2337,7 @@ public sealed class MainWindow : Window
         quickTogglesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         quickTogglesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         quickTogglesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        quickTogglesGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         quickTogglesGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         quickTogglesGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         quickTogglesGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -2179,8 +2392,17 @@ public sealed class MainWindow : Window
             _viewModel.UiTheme = themeToggle.IsOn ? "Dark" : "Light";
         };
         themeInlineRow.Children.Add(themeToggle);
+        var restoreNumLockCheck = CreateCheckBox(
+            "NumLock-Wächter aktivieren (Host hält NumLock an)",
+            () => _viewModel.UiRestoreNumLockAfterVmStart,
+            value => _viewModel.UiRestoreNumLockAfterVmStart = value);
+        restoreNumLockCheck.Margin = new Thickness(0);
+        Grid.SetColumn(restoreNumLockCheck, 0);
+        Grid.SetRow(restoreNumLockCheck, 2);
+        quickTogglesGrid.Children.Add(restoreNumLockCheck);
+
         Grid.SetColumn(themeInlineRow, 0);
-        Grid.SetRow(themeInlineRow, 2);
+        Grid.SetRow(themeInlineRow, 3);
         quickTogglesGrid.Children.Add(themeInlineRow);
 
         var updateCheck = CreateCheckBox("Beim Start auf Updates prüfen", () => _viewModel.UpdateCheckOnStartup, value => _viewModel.UpdateCheckOnStartup = value);
@@ -2394,7 +2616,13 @@ public sealed class MainWindow : Window
 
         var usbipdInfoStack = new StackPanel { Spacing = 4 };
         usbipdInfoStack.Children.Add(new TextBlock { Text = "Externe USB/IP Quelle", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        usbipdInfoStack.Children.Add(new TextBlock { Text = "Quelle: dorssel/usbipd-win", Opacity = 0.9 });
+        usbipdInfoStack.Children.Add(new HyperlinkButton
+        {
+            Content = "Quelle: dorssel/usbipd-win",
+            NavigateUri = new Uri("https://github.com/dorssel/usbipd-win"),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0)
+        });
         usbipdInfoStack.Children.Add(new TextBlock { Text = "Nutzung in HyperTool: externer CLI-/Dienst-Stack für USB-Funktionen in der Host-App.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
         usbipdInfoStack.Children.Add(new TextBlock { Text = "Lizenz/Eigentümer: siehe Original-Repository von dorssel.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
         usbipdCard.Child = usbipdInfoStack;
@@ -2433,19 +2661,36 @@ public sealed class MainWindow : Window
         buttonRow.Children.Add(CreateIconButton("🛰", "Update prüfen", _viewModel.CheckForUpdatesCommand));
         buttonRow.Children.Add(CreateIconButton("⬇", "Update installieren", _viewModel.InstallUpdateCommand));
         buttonRow.Children.Add(CreateIconButton("🌐", "Changelog / Release", _viewModel.OpenReleasePageCommand));
+        var guestDownloadButton = CreateIconButton("⬇", "HyperTool Guest", onClick: async (_, _) => await DownloadLatestGuestToolAsync());
+        guestDownloadButton.Content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                new Image
+                {
+                    Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/HyperTool.Guest.Icon.Transparent.png")),
+                    Width = 20,
+                    Height = 20,
+                    VerticalAlignment = VerticalAlignment.Center
+                },
+                new TextBlock
+                {
+                    Text = "HyperTool Guest",
+                    VerticalAlignment = VerticalAlignment.Center,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+                }
+            }
+        };
+        ToolTipService.SetToolTip(guestDownloadButton, "Lädt das aktuelle HyperTool Guest Installationspaket herunter und startet es.");
+        buttonRow.Children.Add(guestDownloadButton);
         buttonRow.Children.Add(CreateSupportCoffeeButton((_, _) =>
         {
             Process.Start(new ProcessStartInfo
             {
                 FileName = "https://buymeacoffee.com/koerby",
-                UseShellExecute = true
-            });
-        }));
-        buttonRow.Children.Add(CreateIconButton("🔗", "usbipd-win Quelle", onClick: (_, _) =>
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "https://github.com/dorssel/usbipd-win",
                 UseShellExecute = true
             });
         }));
@@ -3751,6 +3996,79 @@ public sealed class MainWindow : Window
         _selectedVmStateText.Foreground = Application.Current.Resources["TextMutedBrush"] as Brush ?? Brush(0xFF, 0xA6, 0xB9, 0xD8);
     }
 
+    private void UpdateHostNetworkProfileStatusUi()
+    {
+        var category = _viewModel.HostNetworkProfileCategory;
+
+        switch (category)
+        {
+            case "Public":
+                _hostNetworkProfileStatusDot.Fill = new SolidColorBrush(Color.FromArgb(0xFF, 0xE8, 0x4A, 0x5F));
+                _hostNetworkProfileStatusText.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0xE8, 0x4A, 0x5F));
+                break;
+
+            case "Private":
+            case "DomainAuthenticated":
+                _hostNetworkProfileStatusDot.Fill = new SolidColorBrush(Color.FromArgb(0xFF, 0x32, 0xD7, 0x4B));
+                _hostNetworkProfileStatusText.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0xD9, 0xF6, 0xE8));
+                break;
+
+            default:
+                _hostNetworkProfileStatusDot.Fill = new SolidColorBrush(Color.FromArgb(0xFF, 0xF6, 0xC3, 0x44));
+                _hostNetworkProfileStatusText.Foreground = Application.Current.Resources["TextMutedBrush"] as Brush
+                    ?? new SolidColorBrush(Color.FromArgb(0xFF, 0xA6, 0xB9, 0xD8));
+                break;
+        }
+
+        if (_vmHostNetworkProfileActionButton is not null)
+        {
+            _vmHostNetworkProfileActionButton.Content = category switch
+            {
+                "Public" => "Auf Privat umstellen",
+                "Private" => "Auf Öffentlich umstellen",
+                "DomainAuthenticated" => "Domäne (gesperrt)",
+                _ => "Netzprofil setzen"
+            };
+
+            _vmHostNetworkProfileActionButton.IsEnabled = !_viewModel.IsBusy
+                && !string.Equals(category, "DomainAuthenticated", StringComparison.OrdinalIgnoreCase)
+                && (string.Equals(category, "Public", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(category, "Private", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private async Task ApplyVmFooterHostNetworkProfileAsync()
+    {
+        if (_vmHostNetworkProfileActionButton is null)
+        {
+            return;
+        }
+
+        var currentCategory = _viewModel.HostNetworkProfileCategory;
+        if (string.Equals(currentCategory, "DomainAuthenticated", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var targetCategory = string.Equals(currentCategory, "Public", StringComparison.OrdinalIgnoreCase)
+            ? "Private"
+            : "Public";
+
+        var changed = await _viewModel.SetHostNetworkProfileCategoryAsync(adapterName: null, category: targetCategory);
+        if (changed && _hostNetworkWindow is not null)
+        {
+            try
+            {
+                await _hostNetworkWindow.ReloadAsync();
+            }
+            catch
+            {
+            }
+        }
+
+        UpdateHostNetworkProfileStatusUi();
+    }
+
     private Button CreateVmChip(VmDefinition vm)
     {
         var chip = new Button
@@ -4093,7 +4411,11 @@ public sealed class MainWindow : Window
             return;
         }
 
-        _hostNetworkWindow = new HostNetworkWindow(adapters, _viewModel.UiTheme);
+        _hostNetworkWindow = new HostNetworkWindow(
+            adapters,
+            _viewModel.UiTheme,
+            (adapterName, category) => _viewModel.SetHostNetworkProfileCategoryAsync(adapterName, category),
+            () => _viewModel.GetHostNetworkAdaptersWithUplinkAsync());
         _hostNetworkWindow.Closed += (_, _) => _hostNetworkWindow = null;
         _hostNetworkWindow.Activate();
     }
@@ -4207,11 +4529,18 @@ public sealed class MainWindow : Window
             || string.Equals(e.PropertyName, nameof(MainViewModel.UiTheme), StringComparison.Ordinal))
         {
             UpdateSelectedVmStateTextStyle();
+            UpdateHostNetworkProfileStatusUi();
 
             if (_isMainLayoutLoaded)
             {
                 RefreshVmAdapterCards();
             }
+        }
+
+        if (string.Equals(e.PropertyName, nameof(MainViewModel.HostNetworkProfileCategory), StringComparison.Ordinal)
+            || string.Equals(e.PropertyName, nameof(MainViewModel.HostNetworkProfileDisplayText), StringComparison.Ordinal))
+        {
+            UpdateHostNetworkProfileStatusUi();
         }
 
         if (string.Equals(e.PropertyName, nameof(MainViewModel.ConfigurationNotice), StringComparison.Ordinal)
@@ -4231,10 +4560,9 @@ public sealed class MainWindow : Window
             UpdateBusyAndNotificationPanel();
         }
 
-        if (string.Equals(e.PropertyName, nameof(MainViewModel.SelectedUsbDevice), StringComparison.Ordinal)
-            && _usbDevicesListView.SelectedItem != _viewModel.SelectedUsbDevice)
+        if (string.Equals(e.PropertyName, nameof(MainViewModel.SelectedUsbDevice), StringComparison.Ordinal))
         {
-            _usbDevicesListView.SelectedItem = _viewModel.SelectedUsbDevice;
+            SyncUsbSelectionFromViewModel();
             _usbAutoShareCheckBox.IsEnabled = _viewModel.SelectedUsbDevice is not null && _viewModel.UsbRuntimeAvailable && _viewModel.HostUsbSharingEnabled;
         }
 
@@ -4269,6 +4597,13 @@ public sealed class MainWindow : Window
         {
             SelectCheckpointNodeInTree(_viewModel.SelectedCheckpointNode);
         }
+
+        if (string.Equals(e.PropertyName, nameof(MainViewModel.SelectedCheckpoint), StringComparison.Ordinal)
+            || string.Equals(e.PropertyName, nameof(MainViewModel.SelectedVm), StringComparison.Ordinal)
+            || string.Equals(e.PropertyName, nameof(MainViewModel.IsBusy), StringComparison.Ordinal))
+        {
+            UpdateSnapshotActionButtonsState();
+        }
     }
 
     private void RunOnUiThread(Action action)
@@ -4302,6 +4637,40 @@ public sealed class MainWindow : Window
         _usbRuntimeHintText.Visibility = (isFeatureEnabled && !isAvailable) ? Visibility.Visible : Visibility.Collapsed;
 
         _usbRemoteFxPolicyHintText.Visibility = Visibility.Visible;
+    }
+
+    private void SyncUsbSelectionFromViewModel()
+    {
+        try
+        {
+            if (_usbDevicesListView.ItemsSource is null)
+            {
+                return;
+            }
+
+            var selected = _viewModel.SelectedUsbDevice;
+            UsbIpDeviceInfo? target = null;
+
+            if (selected is not null)
+            {
+                target = _viewModel.UsbDevices.FirstOrDefault(device => ReferenceEquals(device, selected));
+
+                if (target is null && !string.IsNullOrWhiteSpace(selected.BusId))
+                {
+                    target = _viewModel.UsbDevices.FirstOrDefault(device =>
+                        string.Equals(device.BusId, selected.BusId, StringComparison.OrdinalIgnoreCase));
+                }
+            }
+
+            if (!ReferenceEquals(_usbDevicesListView.SelectedItem, target))
+            {
+                _usbDevicesListView.SelectedItem = target;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "USB selection sync skipped due to invalid list view state.");
+        }
     }
 
     private void UpdateHostFeatureAvailabilityUi()
@@ -4582,6 +4951,77 @@ public sealed class MainWindow : Window
             {
                 _usbRuntimeInstallButton.IsEnabled = true;
             }
+        }
+    }
+
+    private async Task DownloadLatestGuestToolAsync()
+    {
+        try
+        {
+            _viewModel.PublishNotification("HyperTool Guest Installer wird vorbereitet...", "Info");
+
+            var installerResult = await new GitHubUpdateService().CheckForUpdateAsync(
+                GuestRuntimeOwner,
+                GuestRuntimeRepo,
+                "0.0.0",
+                CancellationToken.None,
+                GuestRuntimeAssetHint);
+
+            if (!installerResult.Success || string.IsNullOrWhiteSpace(installerResult.InstallerDownloadUrl))
+            {
+                _viewModel.PublishNotification("Guest-Installer konnte nicht automatisch ermittelt werden. Release-Seite wird geöffnet.", "Warning");
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = $"https://github.com/{GuestRuntimeOwner}/{GuestRuntimeRepo}/releases/latest",
+                    UseShellExecute = true
+                });
+                return;
+            }
+
+            var targetDirectory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "HyperTool", "guest-installers");
+            Directory.CreateDirectory(targetDirectory);
+
+            var fileName = ResolveInstallerFileName(
+                installerResult.InstallerDownloadUrl,
+                installerResult.InstallerFileName,
+                "HyperTool-Guest-Setup.exe");
+
+            var installerPath = System.IO.Path.Combine(targetDirectory, fileName);
+
+            _viewModel.PublishNotification($"Lade HyperTool Guest herunter: {fileName}", "Info");
+            using (var response = await RuntimeInstallerDownloadClient.GetAsync(installerResult.InstallerDownloadUrl, CancellationToken.None))
+            {
+                response.EnsureSuccessStatusCode();
+                await using var stream = new System.IO.FileStream(installerPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await response.Content.CopyToAsync(stream);
+            }
+
+            var extension = System.IO.Path.GetExtension(installerPath);
+            if (string.Equals(extension, ".msi", StringComparison.OrdinalIgnoreCase))
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "msiexec.exe",
+                    Arguments = $"/i \"{installerPath}\" /passive",
+                    UseShellExecute = true,
+                    Verb = "runas"
+                });
+            }
+            else
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = installerPath,
+                    UseShellExecute = true,
+                    Verb = "runas"
+                });
+            }
+
+            _viewModel.PublishNotification("HyperTool Guest Installer gestartet.", "Success");
+        }
+        catch (Exception ex)
+        {
+            _viewModel.PublishNotification($"Guesttool-Download fehlgeschlagen: {ex.Message}", "Error");
         }
     }
 

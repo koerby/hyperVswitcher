@@ -767,6 +767,7 @@ public sealed partial class App : Application
                 var seconds = (DateTimeOffset.UtcNow - startedAtUtc).TotalSeconds;
                 ApplyTrollPalette(seconds);
                 UpdateTrollOverlayScene(seconds);
+                ApplyTrollSceneWarp(seconds);
 
                 await Task.Delay(80, cts.Token);
             }
@@ -1271,6 +1272,8 @@ public sealed partial class App : Application
 
     private void HideTrollOverlay()
     {
+        ResetTrollSceneWarp();
+
         if (_trollOverlayHost is not null)
         {
             if (_trollOverlayDimmer is not null)
@@ -1341,7 +1344,36 @@ public sealed partial class App : Application
 
     private void ApplyTrollSceneWarp(double seconds)
     {
-        ResetTrollSceneWarp();
+        if (_trollSceneTranslate is null || _trollSceneRotate is null)
+        {
+            return;
+        }
+
+        if (seconds < 4d)
+        {
+            ResetTrollSceneWarp();
+            return;
+        }
+
+        var intensity = seconds switch
+        {
+            < 9d => 2.4d,
+            < 20d => 5.4d,
+            < 25d => 8.2d,
+            < 27d => 4.2d,
+            _ => 11.5d
+        };
+
+        var wobbleX = Math.Sin(seconds * 31d) * intensity
+                      + Math.Sin(seconds * 67d) * (intensity * 0.45d);
+        var wobbleY = Math.Cos(seconds * 28d) * (intensity * 0.75d)
+                      + Math.Sin(seconds * 53d) * (intensity * 0.32d);
+
+        _trollSceneTranslate.X = wobbleX;
+        _trollSceneTranslate.Y = wobbleY;
+
+        var maxAngle = intensity * 0.35d;
+        _trollSceneRotate.Angle = Math.Clamp(Math.Sin(seconds * 9.5d) * maxAngle, -8d, 8d);
     }
 
     private void ResetTrollSceneWarp()

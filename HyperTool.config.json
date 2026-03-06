@@ -3,6 +3,7 @@
   "lastSelectedVmName": "",
   "vms": [],
   "defaultSwitchName": "Default Switch",
+  "defaultVmImportDestinationPath": "",
   "vmConnectComputerName": "localhost",
   "hns": {
     "enabled": false,
@@ -15,8 +16,12 @@
     "startMinimized": false,
     "minimizeToTray": true,
     "enableTrayIcon": true,
+    "enableTrayMenu": true,
     "startWithWindows": false,
     "openConsoleAfterVmStart": true,
+    "restoreNumLockAfterVmStart": false,
+    "numLockWatcherIntervalSeconds": 30,
+    "openVmConnectWithSessionEdit": false,
     "trayVmNames": []
   },
   "update": {
@@ -25,6 +30,13 @@
     "gitHubRepo": "HyperTool"
   },
   "usb": {
+    "enabled": true,
+    "autoDetachOnClientDisconnect": true,
+    "unshareOnExit": true,
     "autoShareDeviceKeys": []
+  },
+  "sharedFolders": {
+    "enabled": true,
+    "hostDefinitions": []
   }
 }
