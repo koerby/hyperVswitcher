@@ -2394,7 +2394,7 @@ public sealed class MainWindow : Window
 
         var usbipdInfoStack = new StackPanel { Spacing = 4 };
         usbipdInfoStack.Children.Add(new TextBlock { Text = "Externe USB/IP Quelle", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        usbipdInfoStack.Children.Add(new TextBlock { Text = "Quelle: dorssel/usbipd-win", Opacity = 0.9 });
+        usbipdInfoStack.Children.Add(new HyperlinkButton { Content = "Quelle: dorssel/usbipd-win", NavigateUri = new Uri("https://github.com/dorssel/usbipd-win"), Padding = new Thickness(0), Opacity = 0.9 });
         usbipdInfoStack.Children.Add(new TextBlock { Text = "Nutzung in HyperTool: externer CLI-/Dienst-Stack für USB-Funktionen in der Host-App.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
         usbipdInfoStack.Children.Add(new TextBlock { Text = "Lizenz/Eigentümer: siehe Original-Repository von dorssel.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
         usbipdCard.Child = usbipdInfoStack;
@@ -2438,14 +2438,6 @@ public sealed class MainWindow : Window
             Process.Start(new ProcessStartInfo
             {
                 FileName = "https://buymeacoffee.com/koerby",
-                UseShellExecute = true
-            });
-        }));
-        buttonRow.Children.Add(CreateIconButton("🔗", "usbipd-win Quelle", onClick: (_, _) =>
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "https://github.com/dorssel/usbipd-win",
                 UseShellExecute = true
             });
         }));
