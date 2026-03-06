@@ -3208,7 +3208,7 @@ internal sealed class GuestMainWindow : Window
 
         var usbipStack = new StackPanel { Spacing = 4 };
         usbipStack.Children.Add(new TextBlock { Text = "Externe USB/IP Quelle", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        usbipStack.Children.Add(new TextBlock { Text = "Quelle: vadimgrn/usbip-win2", Opacity = 0.9 });
+        usbipStack.Children.Add(new HyperlinkButton { Content = "Quelle: vadimgrn/usbip-win2", NavigateUri = new Uri("https://github.com/vadimgrn/usbip-win2"), Padding = new Thickness(0), Opacity = 0.9 });
         usbipStack.Children.Add(new TextBlock { Text = "Nutzung in HyperTool: externer CLI-Client ohne eigene GUI-Integration.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
         usbipStack.Children.Add(new TextBlock { Text = "Lizenz/Eigentümer: siehe Original-Repository von vadimgrn.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
         usbipCard.Child = usbipStack;
@@ -3224,7 +3224,7 @@ internal sealed class GuestMainWindow : Window
 
         var winfspStack = new StackPanel { Spacing = 4 };
         winfspStack.Children.Add(new TextBlock { Text = "Externe Shared-Folder Runtime", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        winfspStack.Children.Add(new TextBlock { Text = "Quelle: winfsp/winfsp", Opacity = 0.9 });
+        winfspStack.Children.Add(new HyperlinkButton { Content = $"Quelle: {WinFspRuntimeOwner}/{WinFspRuntimeRepo}", NavigateUri = new Uri($"https://github.com/{WinFspRuntimeOwner}/{WinFspRuntimeRepo}"), Padding = new Thickness(0), Opacity = 0.9 });
         winfspStack.Children.Add(new TextBlock { Text = "Nutzung in HyperTool: externer Runtime-Treiber für Guest Shared-Folder-Mounts.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
         winfspStack.Children.Add(new TextBlock { Text = "Lizenz/Eigentümer: siehe Original-Repository von winfsp.", TextWrapping = TextWrapping.Wrap, Opacity = 0.85 });
         winfspCard.Child = winfspStack;
@@ -3304,8 +3304,6 @@ internal sealed class GuestMainWindow : Window
                 UseShellExecute = true
             });
         }));
-        buttonRow.Children.Add(CreateIconButton("🔗", "usbip-win2 Quelle", onClick: (_, _) => OpenUsbipClientRepository()));
-        buttonRow.Children.Add(CreateIconButton("🔗", "WinFsp Quelle", onClick: (_, _) => OpenWinFspRepository()));
         panel.Children.Add(buttonRow);
 
         return new ScrollViewer { Content = panel };
