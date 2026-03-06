@@ -150,6 +150,7 @@ public sealed class MainWindow : Window
     private DispatcherQueueTimer? _vmChipRefreshDebounceTimer;
     private string _vmChipRefreshSignature = string.Empty;
     private bool _suppressHostFeatureToggleEvents;
+    private bool _suppressUsbSelectionEvents;
 
     public MainWindow(IThemeService themeService, MainViewModel viewModel, bool showStartupSplash = false)
     {
@@ -2847,7 +2848,19 @@ public sealed class MainWindow : Window
         };
         _usbDevicesListView.SelectionChanged += (_, _) =>
         {
-            _viewModel.SelectedUsbDevice = _usbDevicesListView.SelectedItem as UsbIpDeviceInfo;
+            if (_suppressUsbSelectionEvents)
+            {
+                return;
+            }
+
+            try
+            {
+                _viewModel.SelectedUsbDevice = _usbDevicesListView.SelectedItem as UsbIpDeviceInfo;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "USB selection change ignored due to transient list view state.");
+            }
         };
 
         var listLayout = new Grid { RowSpacing = 6 };
@@ -4664,7 +4677,15 @@ public sealed class MainWindow : Window
 
             if (!ReferenceEquals(_usbDevicesListView.SelectedItem, target))
             {
-                _usbDevicesListView.SelectedItem = target;
+                _suppressUsbSelectionEvents = true;
+                try
+                {
+                    _usbDevicesListView.SelectedItem = target;
+                }
+                finally
+                {
+                    _suppressUsbSelectionEvents = false;
+                }
             }
         }
         catch (Exception ex)

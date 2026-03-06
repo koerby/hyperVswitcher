@@ -397,6 +397,93 @@ internal sealed class GuestMainWindow : Window
 
     public async Task PlayStartupAnimationAsync()
     {
+        try
+        {
+            var mainElements = _startupMainElements;
+            if (mainElements is null && Content is Grid rootGrid)
+            {
+                mainElements = rootGrid.Children
+                    .OfType<UIElement>()
+                    .Where(element => !ReferenceEquals(element, _overlay))
+                    .ToList();
+
+                foreach (var element in mainElements)
+                {
+                    element.Opacity = 0;
+                }
+            }
+
+            _overlay.Visibility = Visibility.Visible;
+            _overlay.Opacity = 1;
+            _overlayProgressBar.Value = 8;
+
+            var startupStart = Stopwatch.StartNew();
+            var statusIndex = 0;
+            while (startupStart.ElapsedMilliseconds < GuestSplashMinVisibleMs)
+            {
+                var status = HyperTool.WinUI.Views.LifecycleVisuals.StartupStatusMessages[
+                    statusIndex % HyperTool.WinUI.Views.LifecycleVisuals.StartupStatusMessages.Length];
+                _overlayText.Text = status;
+
+                _overlayProgressBar.Value = Math.Min(92, 8 + (statusIndex * 17));
+                statusIndex++;
+
+                var remaining = GuestSplashMinVisibleMs - startupStart.ElapsedMilliseconds;
+                var delay = (int)Math.Min(GuestSplashStatusCycleMs, remaining);
+                if (delay > 0)
+                {
+                    await Task.Delay(delay);
+                }
+            }
+
+            _overlayText.Text = "Starte HyperTool Guest Oberfläche …";
+            _overlayProgressBar.Value = 100;
+
+            var fadeOut = new DoubleAnimation
+            {
+                From = 1,
+                To = 0,
+                Duration = TimeSpan.FromMilliseconds(420),
+                EasingFunction = HyperTool.WinUI.Views.LifecycleVisuals.CreateEaseInOut(),
+                EnableDependentAnimation = true
+            };
+
+            var story = new Storyboard();
+            Storyboard.SetTarget(fadeOut, _overlay);
+            Storyboard.SetTargetProperty(fadeOut, "Opacity");
+            story.Children.Add(fadeOut);
+
+            if (mainElements is not null)
+            {
+                foreach (var element in mainElements)
+                {
+                    var fadeInMain = new DoubleAnimation
+                    {
+                        From = 0,
+                        To = 1,
+                        Duration = TimeSpan.FromMilliseconds(420),
+                        EasingFunction = HyperTool.WinUI.Views.LifecycleVisuals.CreateEaseOut(),
+                        EnableDependentAnimation = true
+                    };
+
+                    Storyboard.SetTarget(fadeInMain, element);
+                    Storyboard.SetTargetProperty(fadeInMain, "Opacity");
+                    story.Children.Add(fadeInMain);
+                }
+            }
+
+            story.Begin();
+
+            await Task.Delay(460);
+        }
+        finally
+        {
+            ForceDismissStartupSplash();
+        }
+    }
+
+    public void ForceDismissStartupSplash()
+    {
         var mainElements = _startupMainElements;
         if (mainElements is null && Content is Grid rootGrid)
         {
@@ -404,75 +491,18 @@ internal sealed class GuestMainWindow : Window
                 .OfType<UIElement>()
                 .Where(element => !ReferenceEquals(element, _overlay))
                 .ToList();
-
-            foreach (var element in mainElements)
-            {
-                element.Opacity = 0;
-            }
         }
-
-        _overlay.Visibility = Visibility.Visible;
-        _overlay.Opacity = 1;
-        _overlayProgressBar.Value = 8;
-
-        var startupStart = Stopwatch.StartNew();
-        var statusIndex = 0;
-        while (startupStart.ElapsedMilliseconds < GuestSplashMinVisibleMs)
-        {
-            var status = HyperTool.WinUI.Views.LifecycleVisuals.StartupStatusMessages[
-                statusIndex % HyperTool.WinUI.Views.LifecycleVisuals.StartupStatusMessages.Length];
-            _overlayText.Text = status;
-
-            _overlayProgressBar.Value = Math.Min(92, 8 + (statusIndex * 17));
-            statusIndex++;
-
-            var remaining = GuestSplashMinVisibleMs - startupStart.ElapsedMilliseconds;
-            var delay = (int)Math.Min(GuestSplashStatusCycleMs, remaining);
-            if (delay > 0)
-            {
-                await Task.Delay(delay);
-            }
-        }
-
-        _overlayText.Text = "Starte HyperTool Guest Oberfläche …";
-        _overlayProgressBar.Value = 100;
-
-        var fadeOut = new DoubleAnimation
-        {
-            From = 1,
-            To = 0,
-            Duration = TimeSpan.FromMilliseconds(420),
-            EasingFunction = HyperTool.WinUI.Views.LifecycleVisuals.CreateEaseInOut(),
-            EnableDependentAnimation = true
-        };
-
-        var story = new Storyboard();
-        Storyboard.SetTarget(fadeOut, _overlay);
-        Storyboard.SetTargetProperty(fadeOut, "Opacity");
-        story.Children.Add(fadeOut);
 
         if (mainElements is not null)
         {
             foreach (var element in mainElements)
             {
-                var fadeInMain = new DoubleAnimation
-                {
-                    From = 0,
-                    To = 1,
-                    Duration = TimeSpan.FromMilliseconds(420),
-                    EasingFunction = HyperTool.WinUI.Views.LifecycleVisuals.CreateEaseOut(),
-                    EnableDependentAnimation = true
-                };
-
-                Storyboard.SetTarget(fadeInMain, element);
-                Storyboard.SetTargetProperty(fadeInMain, "Opacity");
-                story.Children.Add(fadeInMain);
+                element.Opacity = 1;
             }
         }
 
-        story.Begin();
-
-        await Task.Delay(460);
+        _overlayProgressBar.Value = 100;
+        _overlay.Opacity = 0;
         _overlay.Visibility = Visibility.Collapsed;
         _startupMainElements = null;
     }

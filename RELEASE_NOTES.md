@@ -32,12 +32,19 @@
 - Snapshot-Flow:
 	- `Create` per Dialog (Name/Beschreibung).
 	- `Restore/Delete` mit Bestätigungsdialogen.
+- Guest USB Auto-Connect:
+	- Auto-Connect versucht Verbindungen nur noch bei Host-seitig tatsächlich freigegebenen Geräten (`Shared`).
+	- Wiederholte Attach-Fehler laufen nicht mehr in eine aggressive Dauerschleife (Backoff statt Dauer-Retry).
 
 ### Behoben
 
 - Host USB-UI: robustere Selection-Synchronisierung gegen Index/State-Race in WinRT-ListView-Brücken.
+- Host USB Status-Konsistenz:
+	- Stale `Attached`-Zustände nach verpasstem Guest-Disconnect-Event werden im Host nach Grace-Periode automatisch bereinigt (Auto-Detach).
 - Troll-Overlay Host/Guest: Shake/Wobble/Warp wiederhergestellt und Reset/Centering stabilisiert.
 - Update-Sicherheit: Konfigurationsdateien werden bei Updates nicht mehr unbeabsichtigt überschrieben (Host/Guest Installer + Laufzeitpfade).
+- Guest Start-Stabilität:
+	- Startup-Splash hat jetzt einen Failsafe, damit die Oberfläche auch bei Fehlern im Startup-Flow nicht im Overlay hängenbleibt.
 
 ### Doku
 

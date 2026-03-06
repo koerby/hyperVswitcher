@@ -21,6 +21,7 @@ public partial class MainViewModel : ViewModelBase
     private const int VkNumLock = 0x90;
     private const uint KeyeventfExtendedKey = 0x0001;
     private const uint KeyeventfKeyUp = 0x0002;
+    private static readonly TimeSpan StaleUsbAttachGracePeriod = TimeSpan.FromSeconds(25);
 
     [ObservableProperty]
     private string _windowTitle = "HyperTool";
@@ -425,6 +426,7 @@ public partial class MainViewModel : ViewModelBase
     private bool _suppressUsbAutoShareToggleHandling;
     private readonly SemaphoreSlim _usbTrayRefreshGate = new(1, 1);
     private readonly HashSet<string> _usbAutoShareDeviceKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _usbAttachedWithoutAckSinceUtc = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HttpClient UpdateDownloadClient = new();
     private int _uiNumLockWatcherIntervalSeconds = 30;
 
@@ -1695,6 +1697,19 @@ public partial class MainViewModel : ViewModelBase
                         AddNotification($"Auto-Share: {autoShareFailed} USB-Gerät(e) konnten nicht freigegeben werden.", "Warning");
                     }
                 }
+
+                if (UsbAutoDetachOnClientDisconnect)
+                {
+                    var detachedStaleCount = await TryDetachStaleAttachedDevicesWithoutGuestAckAsync(devices, token);
+                    if (detachedStaleCount > 0)
+                    {
+                        devices = await _usbIpService.GetDevicesAsync(token);
+                    }
+                }
+                else
+                {
+                    _usbAttachedWithoutAckSinceUtc.Clear();
+                }
             }
             catch (Exception ex)
             {
@@ -1759,6 +1774,79 @@ public partial class MainViewModel : ViewModelBase
         {
             await loadAction(_lifetimeCancellation.Token);
         }
+    }
+
+    private async Task<int> TryDetachStaleAttachedDevicesWithoutGuestAckAsync(IReadOnlyList<UsbIpDeviceInfo> devices, CancellationToken token)
+    {
+        if (devices.Count == 0)
+        {
+            _usbAttachedWithoutAckSinceUtc.Clear();
+            return 0;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var activeAttachedBusIds = devices
+            .Where(device => device.IsAttached && !string.IsNullOrWhiteSpace(device.BusId))
+            .Select(device => device.BusId.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var obsoleteKeys = _usbAttachedWithoutAckSinceUtc.Keys
+            .Where(key => !activeAttachedBusIds.Contains(key))
+            .ToList();
+
+        foreach (var obsoleteKey in obsoleteKeys)
+        {
+            _usbAttachedWithoutAckSinceUtc.Remove(obsoleteKey);
+        }
+
+        var detachedCount = 0;
+
+        foreach (var device in devices)
+        {
+            if (!device.IsAttached || string.IsNullOrWhiteSpace(device.BusId))
+            {
+                continue;
+            }
+
+            var busId = device.BusId.Trim();
+
+            if (!string.Equals(device.ClientIpAddress?.Trim(), HyperVSocketUsbTunnelDefaults.LoopbackAddress, StringComparison.OrdinalIgnoreCase))
+            {
+                _usbAttachedWithoutAckSinceUtc.Remove(busId);
+                continue;
+            }
+
+            if (UsbGuestConnectionRegistry.TryGetGuestComputerName(busId, out _))
+            {
+                _usbAttachedWithoutAckSinceUtc.Remove(busId);
+                continue;
+            }
+
+            if (!_usbAttachedWithoutAckSinceUtc.TryGetValue(busId, out var firstSeenUtc))
+            {
+                _usbAttachedWithoutAckSinceUtc[busId] = now;
+                continue;
+            }
+
+            if ((now - firstSeenUtc) < StaleUsbAttachGracePeriod)
+            {
+                continue;
+            }
+
+            try
+            {
+                await _usbIpService.DetachAsync(busId, token);
+                detachedCount++;
+                _usbAttachedWithoutAckSinceUtc.Remove(busId);
+                Log.Information("Stale attached USB device detached on host (missing guest ack). BusId={BusId}", busId);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "Stale attached USB auto-detach failed. BusId={BusId}", busId);
+            }
+        }
+
+        return detachedCount;
     }
 
     private static string BuildUsbUnavailableStatus(string? details)

@@ -23,6 +23,7 @@ namespace HyperTool.Guest;
 public sealed partial class App : Application
 {
     private const int GuestUsbAutoRefreshSeconds = 4;
+    private const int GuestUsbAutoConnectFailureBackoffSeconds = 20;
     private const int SharedFolderCatalogFetchMaxAttempts = 3;
     private static readonly TimeSpan RecurringWarnRateLimitInterval = TimeSpan.FromMinutes(2);
     private const string GuestWindowTitle = "HyperTool Guest";
@@ -98,6 +99,7 @@ public sealed partial class App : Application
     ];
 
     private readonly List<UsbIpDeviceInfo> _usbDevices = [];
+    private readonly Dictionary<string, DateTimeOffset> _usbAutoConnectBackoffUntilUtc = new(StringComparer.OrdinalIgnoreCase);
     private string? _selectedUsbBusId;
     private bool _isUsbClientAvailable;
     private bool _usbClientMissingLogged;
@@ -1268,8 +1270,16 @@ public sealed partial class App : Application
                     await _mainWindow.PlayStartupAnimationAsync();
                     _mainWindow.ApplyTheme(_config.Ui.Theme);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    GuestLogger.Warn("startup.splash.failed", ex.Message, new
+                    {
+                        exceptionType = ex.GetType().FullName
+                    });
+                }
+                finally
+                {
+                    _mainWindow.ForceDismissStartupSplash();
                 }
             }
         }
@@ -3490,14 +3500,77 @@ public sealed partial class App : Application
             return 0;
         }
 
+        var now = DateTimeOffset.UtcNow;
+        var backoffSkipped = 0;
+        var notSharedSkipped = 0;
+
+        var expiredBackoffKeys = _usbAutoConnectBackoffUntilUtc
+            .Where(entry => entry.Value <= now)
+            .Select(entry => entry.Key)
+            .ToList();
+
+        foreach (var key in expiredBackoffKeys)
+        {
+            _usbAutoConnectBackoffUntilUtc.Remove(key);
+        }
+
         var candidates = devices
             .Where(device =>
                 !string.IsNullOrWhiteSpace(device.BusId)
                 && !device.IsAttached
-                && keySet.Contains(BuildUsbAutoConnectKey(device)))
+                && device.IsShared
+                && keySet.Contains(BuildUsbAutoConnectKey(device))
+                && IsUsbAutoConnectAllowedNow(device.BusId!.Trim(), now, ref backoffSkipped))
             .Select(device => device.BusId.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        foreach (var device in devices)
+        {
+            if (string.IsNullOrWhiteSpace(device.BusId))
+            {
+                continue;
+            }
+
+            if (device.IsAttached || device.IsShared)
+            {
+                continue;
+            }
+
+            if (!keySet.Contains(BuildUsbAutoConnectKey(device)))
+            {
+                continue;
+            }
+
+            notSharedSkipped++;
+        }
+
+        if (backoffSkipped > 0)
+        {
+            WarnRateLimited(
+                eventName: "usb.autoconnect.backoff.active",
+                message: "USB Auto-Connect wartet wegen vorherigen Attach-Fehlern (Backoff aktiv).",
+                data: new
+                {
+                    skipped = backoffSkipped,
+                    backoffSeconds = GuestUsbAutoConnectFailureBackoffSeconds
+                },
+                scopeKey: "global",
+                minInterval: RecurringWarnRateLimitInterval);
+        }
+
+        if (notSharedSkipped > 0)
+        {
+            WarnRateLimited(
+                eventName: "usb.autoconnect.skipped.not_shared",
+                message: "USB Auto-Connect übersprungen: Gerät ist auf dem Host aktuell nicht freigegeben.",
+                data: new
+                {
+                    skipped = notSharedSkipped
+                },
+                scopeKey: "global",
+                minInterval: RecurringWarnRateLimitInterval);
+        }
 
         var connectedCount = 0;
         foreach (var busId in candidates)
@@ -3505,11 +3578,33 @@ public sealed partial class App : Application
             var result = await ConnectUsbAsync(busId);
             if (result == 0)
             {
+                _usbAutoConnectBackoffUntilUtc.Remove(busId);
                 connectedCount++;
+            }
+            else
+            {
+                _usbAutoConnectBackoffUntilUtc[busId] = DateTimeOffset.UtcNow.AddSeconds(GuestUsbAutoConnectFailureBackoffSeconds);
             }
         }
 
         return connectedCount;
+    }
+
+    private bool IsUsbAutoConnectAllowedNow(string busId, DateTimeOffset now, ref int backoffSkipped)
+    {
+        if (!_usbAutoConnectBackoffUntilUtc.TryGetValue(busId, out var blockedUntilUtc))
+        {
+            return true;
+        }
+
+        if (blockedUntilUtc <= now)
+        {
+            _usbAutoConnectBackoffUntilUtc.Remove(busId);
+            return true;
+        }
+
+        backoffSkipped++;
+        return false;
     }
 
     private static string BuildUsbAutoConnectKey(UsbIpDeviceInfo device)

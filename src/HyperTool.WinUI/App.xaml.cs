@@ -2081,7 +2081,7 @@ public sealed partial class App : Application
                     && !_mainViewModel.IsBusy
                     && _mainViewModel.HasUsbAutoShareConfigured)
                 {
-                    await _mainViewModel.RefreshUsbDevicesFromTrayAsync();
+                    await RefreshHostUsbDevicesSafeAsync();
                 }
             }
             catch (Exception ex)
